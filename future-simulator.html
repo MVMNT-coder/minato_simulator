@@ -1,0 +1,2773 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FUTURE SIMULATOR</title>
+<style>
+/* ============================================================
+   FUTURE SIMULATOR — 通信型ライフシミュレーション（作り込み版）
+   暗く静かなSFインターフェース / 展示モニター(16:9)優先
+   ============================================================ */
+
+:root {
+  --bg-deep:   #04070d;
+  --panel:     rgba(14, 22, 38, 0.72);
+  --line:      rgba(120, 200, 220, 0.22);
+  --text:      #dfeaf2;   /* 青みのある白 */
+  --text-dim:  #8fa4b5;
+  --mint:      #7df0d4;
+  --cyan:      #6fd7ff;
+  --blue-pale: #a9c8ff;
+  --danger:    #ff5a6e;
+  --acc:       var(--mint); /* ステージごとに上書きされるアクセント色 */
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  background:
+    radial-gradient(ellipse 120% 80% at 50% -10%, rgba(30, 60, 100, 0.25), transparent 60%),
+    radial-gradient(ellipse 100% 100% at 50% 120%, rgba(20, 70, 80, 0.18), transparent 55%),
+    var(--bg-deep);
+  color: var(--text);
+  font-family: "Helvetica Neue", "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Noto Sans JP", Meiryo, sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 展示モニター用：全画面に薄い走査線 */
+body::after {
+  content: "";
+  position: fixed; inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom,
+    transparent 0 3px, rgba(255,255,255,0.012) 3px 4px);
+  z-index: 999;
+}
+
+#app {
+  height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 4vh 6vw;
+  position: relative;
+}
+
+/* ---------- 画面遷移フェード ---------- */
+.screen {
+  width: 100%; max-width: 1280px;
+  display: flex; flex-direction: column; align-items: center;
+  animation: screenIn 0.7s ease both;
+}
+@keyframes screenIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.scrollable {
+  max-height: 92vh; overflow-y: auto; padding: 2vh 8px;
+}
+.scrollable::-webkit-scrollbar { width: 6px; }
+.scrollable::-webkit-scrollbar-thumb { background: rgba(120,200,220,0.2); border-radius: 3px; }
+
+/* ---------- タイポグラフィ ---------- */
+.eyebrow {
+  font-size: 13px; letter-spacing: 0.45em;
+  color: var(--acc); text-transform: uppercase;
+  margin-bottom: 18px; opacity: 0.9;
+}
+.h-large {
+  font-size: clamp(34px, 4.6vw, 64px); font-weight: 300;
+  letter-spacing: 0.22em; text-align: center; line-height: 1.35;
+}
+.h-mid {
+  font-size: clamp(20px, 2.2vw, 30px); font-weight: 400;
+  letter-spacing: 0.12em; text-align: center; line-height: 1.8;
+}
+.lead {
+  font-size: clamp(15px, 1.3vw, 18px); color: var(--text-dim);
+  letter-spacing: 0.08em; line-height: 2.1; text-align: center;
+}
+
+/* ---------- ボタン ---------- */
+.btn {
+  appearance: none;
+  background: rgba(125, 240, 212, 0.04);
+  border: 1px solid var(--mint); color: var(--mint);
+  font-family: inherit;
+  font-size: clamp(15px, 1.25vw, 18px);
+  letter-spacing: 0.3em; text-indent: 0.3em;
+  padding: 20px 64px; cursor: pointer; border-radius: 2px;
+  transition: box-shadow 0.35s, background 0.35s, opacity 0.3s;
+}
+.btn:hover:not(:disabled) {
+  background: rgba(125, 240, 212, 0.12);
+  box-shadow: 0 0 22px rgba(125,240,212,0.45), inset 0 0 14px rgba(125,240,212,0.15);
+}
+.btn:disabled { opacity: 0.28; cursor: not-allowed; }
+.btn-sub {
+  border-color: rgba(143,164,181,0.5); color: var(--text-dim); background: transparent;
+}
+.btn-sub:hover:not(:disabled) {
+  box-shadow: 0 0 14px rgba(143,164,181,0.3); background: rgba(143,164,181,0.08);
+}
+.btn-jp { display: block; font-size: 11px; letter-spacing: 0.2em; color: var(--text-dim); margin-top: 6px; }
+.actions {
+  margin-top: 5vh; display: flex; gap: 24px;
+  align-items: center; justify-content: center; flex-wrap: wrap;
+}
+
+/* ---------- 待機画面 ---------- */
+.standby-title {
+  font-size: clamp(44px, 6.5vw, 96px); font-weight: 200;
+  letter-spacing: 0.28em; text-indent: 0.28em; text-align: center;
+  text-shadow: 0 0 40px rgba(111,215,255,0.35);
+}
+.standby-meta {
+  margin-top: 4vh; text-align: center;
+  font-size: 13px; letter-spacing: 0.35em;
+  color: var(--text-dim); line-height: 2.6;
+}
+.standby-meta em { font-style: normal; color: var(--cyan); }
+.connect-btn {
+  margin-top: 7vh; font-size: 20px; padding: 24px 96px;
+  animation: startPulse 3.2s ease-in-out infinite;
+}
+@keyframes startPulse {
+  0%,100% { box-shadow: 0 0 6px rgba(125,240,212,0.15); }
+  50%     { box-shadow: 0 0 26px rgba(125,240,212,0.4); }
+}
+
+/* ---------- 受信通知 ---------- */
+.notice-card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 52px 72px;
+  display: flex; flex-direction: column; align-items: center;
+  backdrop-filter: blur(4px);
+}
+.notice-indicator {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 26px; font-size: 13px; letter-spacing: 0.35em; color: var(--cyan);
+}
+.blink-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--cyan); box-shadow: 0 0 12px var(--cyan);
+  animation: blink 1.1s steps(2, start) infinite;
+}
+@keyframes blink { 50% { opacity: 0.1; } }
+.meta-rows {
+  margin-bottom: 30px; font-size: 13px; letter-spacing: 0.25em;
+  color: var(--text-dim); line-height: 2.4; text-align: center;
+}
+.meta-rows b { color: var(--blue-pale); font-weight: 400; }
+
+/* ---------- ミナト映像フレーム ---------- */
+.video-frame {
+  position: relative;
+  width: min(760px, 84vw);
+  background: linear-gradient(180deg, rgba(10,18,32,0.9), rgba(6,10,18,0.95));
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 32px 40px 28px; overflow: hidden;
+}
+.video-frame::before {           /* 微細ノイズ＋走査線 */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(to bottom,
+    rgba(255,255,255,0.03) 0 1px, transparent 1px 4px);
+  animation: noiseFlicker 0.9s steps(3) infinite;
+}
+@keyframes noiseFlicker {
+  0%   { opacity: 0.5; transform: translateY(0); }
+  33%  { opacity: 0.9; transform: translateY(-1px); }
+  66%  { opacity: 0.4; transform: translateY(1px); }
+  100% { opacity: 0.7; transform: translateY(0); }
+}
+.video-hud {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; letter-spacing: 0.25em; color: var(--text-dim);
+  margin-bottom: 24px;
+}
+.rec-badge { display: flex; align-items: center; gap: 8px; color: var(--danger); }
+.rec-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--danger); box-shadow: 0 0 10px var(--danger);
+  animation: blink 1s steps(2, start) infinite;
+}
+.timecode { font-variant-numeric: tabular-nums; color: var(--blue-pale); }
+
+/* グリッチ風円形アバター（CSSのみ） */
+.avatar {
+  position: relative; width: 156px; height: 156px;
+  margin: 0 auto 8px; border-radius: 50%;
+  border: 1px solid rgba(111,215,255,0.45);
+  background:
+    radial-gradient(circle at 50% 34%, rgba(111,215,255,0.55) 0 21%, transparent 22%),
+    radial-gradient(ellipse 42% 30% at 50% 88%, rgba(111,215,255,0.45) 0 60%, transparent 61%),
+    radial-gradient(circle at 50% 50%, rgba(20,40,66,0.9), rgba(8,14,26,0.95));
+  box-shadow: 0 0 28px rgba(111,215,255,0.18), inset 0 0 30px rgba(0,0,0,0.5);
+  overflow: hidden;
+  animation: avatarGlitch 4s steps(1) infinite;
+}
+.avatar::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 3px;
+  background: rgba(125,240,212,0.5);
+  animation: glitchLine 2.6s linear infinite;
+}
+@keyframes glitchLine {
+  0% { top: -5%; opacity: 0; } 8% { opacity: 0.8; }
+  50% { top: 60%; opacity: 0.3; } 100% { top: 105%; opacity: 0; }
+}
+@keyframes avatarGlitch {
+  0%,91%,100% { transform: translateX(0); filter: none; }
+  92% { transform: translateX(-3px); filter: hue-rotate(40deg); }
+  94% { transform: translateX(2px);  filter: hue-rotate(-30deg); }
+  96% { transform: translateX(0);    filter: none; }
+}
+.avatar-caption {
+  text-align: center; font-size: 11px; letter-spacing: 0.4em;
+  color: var(--text-dim); margin-bottom: 22px;
+}
+
+@keyframes lineIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- ノベルゲーム式 会話ウィンドウ ---------- */
+.dlg-screen { justify-content: center; }
+.dlg-visual { padding-bottom: 26px; }
+.dlg-window {
+  width: min(880px, 92vw);
+  min-height: 176px;
+  margin-top: 3.5vh;
+  position: relative;
+  background: rgba(6,12,24,0.92);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 26px 40px 44px;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow: 0 0 34px color-mix(in srgb, var(--acc, var(--mint)) 8%, transparent);
+  animation: lineIn 0.4s ease both;
+}
+.dlg-speaker {
+  display: inline-block;
+  font-size: 11px; letter-spacing: 0.35em;
+  color: var(--acc, var(--mint));
+  border: 1px solid color-mix(in srgb, var(--acc, var(--mint)) 40%, transparent);
+  border-radius: 3px;
+  padding: 5px 14px 4px;
+  margin-bottom: 18px;
+}
+.dlg-text {
+  font-size: clamp(15px, 1.5vw, 20px);
+  line-height: 2.15; letter-spacing: 0.05em;
+  min-height: 4.3em;
+  color: var(--text);
+}
+.dlg-adv {
+  position: absolute; right: 30px; bottom: 16px;
+  color: var(--acc, var(--mint));
+  font-size: 14px;
+  visibility: hidden;
+  animation: advBounce 1.1s ease-in-out infinite;
+}
+.dlg-adv .lbl {
+  font-size: 10px; letter-spacing: 0.3em;
+  color: var(--text-dim); margin-right: 10px;
+}
+@keyframes advBounce {
+  0%, 100% { transform: translateY(0);   opacity: 0.95; }
+  50%      { transform: translateY(5px); opacity: 0.45; }
+}
+.dlg-progress {
+  position: absolute; left: 30px; bottom: 16px;
+  font-size: 10px; letter-spacing: 0.3em;
+  color: rgba(143,164,181,0.5);
+}
+
+/* ---------- 起動/ローディング ---------- */
+.loading-logo {
+  font-size: clamp(34px, 4.5vw, 60px); font-weight: 200;
+  letter-spacing: 0.3em; text-indent: 0.3em; text-align: center;
+  animation: logoPulse 2.4s ease-in-out infinite;
+}
+@keyframes logoPulse {
+  0%,100% { opacity: 0.35; text-shadow: 0 0 10px rgba(111,215,255,0.15); }
+  50%     { opacity: 1;    text-shadow: 0 0 42px rgba(111,215,255,0.55); }
+}
+.loading-bar {
+  margin-top: 26px; width: min(420px, 60vw); height: 2px;
+  background: rgba(120,200,220,0.15); overflow: hidden; border-radius: 2px;
+}
+.loading-bar span {
+  display: block; height: 100%; width: 40%;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  animation: barSlide 1.4s ease-in-out infinite;
+}
+@keyframes barSlide { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
+
+/* ターミナル風の逐次ログ（起動・送信演出で共用） */
+.term-log {
+  margin-top: 5vh; min-height: 150px;
+  font-size: 14px; letter-spacing: 0.25em; line-height: 2.6;
+  color: var(--mint); text-align: left;
+}
+.term-log div { animation: lineIn 0.4s ease both; }
+.term-log .dim { color: var(--text-dim); }
+
+/* ---------- システム音声カード ---------- */
+.system-card {
+  width: min(820px, 86vw);
+  background: rgba(10,17,32,0.85);
+  border: 1px solid var(--line); border-left: 3px solid var(--cyan);
+  border-radius: 4px; padding: 42px 56px;
+}
+.system-label {
+  font-size: 12px; letter-spacing: 0.4em; color: var(--cyan);
+  margin-bottom: 26px; display: flex; align-items: center; gap: 12px;
+}
+.system-label::after {
+  content: ""; flex: 1; height: 1px;
+  background: linear-gradient(90deg, rgba(111,215,255,0.4), transparent);
+}
+.system-text {
+  min-height: 120px; display: flex; align-items: center;
+  font-size: clamp(16px, 1.5vw, 20px);
+  line-height: 2.2; letter-spacing: 0.06em;
+  animation: lineIn 0.45s ease both;
+}
+
+/* ---------- STAGE INTRO ---------- */
+.stage-number {
+  font-size: 14px; letter-spacing: 0.6em; text-indent: 0.6em;
+  color: var(--acc); margin-bottom: 20px;
+}
+.stage-age {
+  font-size: clamp(64px, 9vw, 128px); font-weight: 100;
+  letter-spacing: 0.08em; line-height: 1;
+  text-shadow: 0 0 60px rgba(125,240,212,0.3);
+}
+.stage-age small {
+  font-size: 0.28em; letter-spacing: 0.4em; color: var(--acc);
+  font-weight: 300; vertical-align: 0.5em; margin-right: 0.6em;
+}
+.stage-theme {
+  margin-top: 4vh;
+  font-size: clamp(18px, 1.9vw, 26px);
+  letter-spacing: 0.1em; line-height: 1.9; text-align: center;
+  color: var(--blue-pale);
+}
+
+/* ---------- ステージごとのUIモチーフ（HUDパネル） ---------- */
+.hud-panel {
+  width: min(560px, 80vw);
+  border: 1px solid var(--acc);
+  border-radius: 4px;
+  background: rgba(8,14,26,0.8);
+  padding: 24px 32px;
+  box-shadow: 0 0 24px color-mix(in srgb, var(--acc) 18%, transparent),
+              inset 0 0 20px rgba(0,0,0,0.4);
+}
+.hud-title {
+  font-size: 13px; letter-spacing: 0.4em; color: var(--acc);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px; margin-bottom: 14px;
+  display: flex; align-items: center; gap: 10px;
+}
+.hud-title::before {
+  content: ""; width: 8px; height: 8px;
+  background: var(--acc); box-shadow: 0 0 8px var(--acc);
+  animation: blink 1.6s steps(2, start) infinite;
+}
+.hud-row {
+  display: flex; justify-content: space-between; gap: 20px;
+  font-size: 13px; letter-spacing: 0.18em; line-height: 2.4;
+}
+.hud-row .k { color: var(--text-dim); }
+.hud-row .v { color: var(--text); text-align: right; }
+.hud-row .v.warn { color: var(--danger); animation: blink 1.4s steps(2, start) infinite; }
+
+/* 生活シーンの叙述テキスト */
+.scene-text {
+  margin-top: 4vh; max-width: 720px;
+  font-size: clamp(14px, 1.3vw, 17px);
+  line-height: 2.4; letter-spacing: 0.05em;
+  color: var(--text-dim); text-align: center;
+}
+.scene-text p { margin-bottom: 1.6em; }
+
+/* ---------- カード選択（レンズ／断片） ---------- */
+.card-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 26px; width: 100%; margin-top: 4vh;
+}
+@media (max-width: 900px) {
+  .card-grid { grid-template-columns: 1fr; }
+  #app { overflow-y: auto; justify-content: flex-start; }
+}
+.select-card {
+  background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 30px 28px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 14px; text-align: left;
+  transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s, background 0.3s;
+}
+.select-card:hover {
+  border-color: color-mix(in srgb, var(--acc) 55%, transparent);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.4), 0 0 16px color-mix(in srgb, var(--acc) 15%, transparent);
+}
+.select-card.selected {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 7%, transparent);
+  box-shadow: 0 0 26px color-mix(in srgb, var(--acc) 35%, transparent),
+              inset 0 0 18px color-mix(in srgb, var(--acc) 7%, transparent);
+}
+.card-tag { font-size: 11px; letter-spacing: 0.35em; color: var(--cyan); }
+.select-card.selected .card-tag { color: var(--acc); }
+.card-title {
+  font-size: clamp(15px, 1.35vw, 19px);
+  line-height: 1.8; letter-spacing: 0.04em;
+}
+.card-desc {
+  font-size: clamp(13px, 1.05vw, 15px);
+  line-height: 2; color: var(--text-dim); letter-spacing: 0.03em;
+}
+
+/* ---------- 人生の断片 詳細 ---------- */
+.log-detail {
+  width: min(780px, 86vw);
+  background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 46px 58px;
+}
+.log-detail-title {
+  font-size: clamp(19px, 1.9vw, 25px);
+  letter-spacing: 0.08em; line-height: 1.8;
+  margin: 18px 0 28px;
+}
+.log-detail-body p {
+  font-size: clamp(14px, 1.3vw, 17px);
+  line-height: 2.3; letter-spacing: 0.05em;
+  color: var(--text-dim); margin-bottom: 14px;
+}
+.log-feeling {
+  margin-top: 32px;
+  border: 1px solid color-mix(in srgb, var(--acc) 45%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--acc) 6%, transparent);
+  padding: 26px 30px;
+}
+.log-feeling .card-tag { color: var(--acc); display: block; margin-bottom: 14px; }
+.log-feeling p {
+  font-size: clamp(15px, 1.45vw, 19px);
+  line-height: 2.1; letter-spacing: 0.05em; color: var(--acc);
+}
+
+/* ---------- 書類・記録風パネル（部屋の記録／人生の断片） ---------- */
+.doc-panel {
+  width: min(760px, 86vw);
+  background: rgba(10,16,28,0.9);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 40px 52px;
+  text-align: left;
+}
+.doc-kicker {
+  font-size: 11px; letter-spacing: 0.35em;
+  color: var(--acc); margin-bottom: 14px;
+}
+.doc-title {
+  font-size: clamp(17px, 1.7vw, 22px);
+  letter-spacing: 0.12em; line-height: 1.8;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px; margin-bottom: 24px;
+}
+.doc-body p {
+  font-size: clamp(14px, 1.25vw, 16px);
+  line-height: 2.2; letter-spacing: 0.04em;
+  color: var(--text-dim); margin-bottom: 14px;
+}
+.doc-body ul { list-style: none; margin: 6px 0 18px; }
+.doc-body ul li {
+  font-size: clamp(13px, 1.2vw, 15px);
+  line-height: 2.3; letter-spacing: 0.04em;
+  color: var(--text); padding-left: 1.3em; position: relative;
+}
+.doc-body ul li::before { content: "◦"; position: absolute; left: 0; color: var(--acc); }
+.doc-quote {
+  border-left: 2px solid color-mix(in srgb, var(--acc) 45%, transparent);
+  padding-left: 20px; margin-top: 8px;
+}
+.doc-quote p { color: var(--text); }
+.doc-note {
+  margin-top: 22px; font-size: 12px; line-height: 2.1;
+  letter-spacing: 0.05em; color: rgba(143,164,181,0.65);
+  border-top: 1px dashed var(--line); padding-top: 16px;
+}
+
+/* 部屋の記録カード（確認済み表示） */
+.select-card.viewed { border-style: dashed; opacity: 0.85; }
+.record-check { font-size: 11px; letter-spacing: 0.3em; color: var(--acc); }
+.record-hint {
+  margin-top: 3vh; font-size: 12px; letter-spacing: 0.15em;
+  color: var(--text-dim); text-align: center;
+}
+
+/* レンズカードの「問い」 */
+.card-question {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  font-size: clamp(13px, 1.05vw, 15px);
+  line-height: 2; letter-spacing: 0.04em;
+  color: var(--blue-pale);
+}
+.card-question::before {
+  content: "問い";
+  display: block;
+  font-size: 10px; letter-spacing: 0.35em;
+  color: var(--acc); margin-bottom: 8px;
+}
+
+/* ---------- LIFE DESIGN PROMPT（選び直しのための問い） ---------- */
+/* この未来で当たり前になっている前提の一覧 */
+.assume-panel {
+  width: min(720px, 88vw);
+  border: 1px solid var(--line);
+  background: rgba(8,14,26,0.7);
+  padding: 22px 30px;
+  margin-top: 3vh;
+}
+.assume-item {
+  font-size: clamp(13px, 1.2vw, 15px);
+  line-height: 2.1; letter-spacing: 0.05em;
+  color: var(--text);
+  padding: 13px 4px 13px 1.7em;
+  position: relative;
+  border-bottom: 1px dashed var(--line);
+}
+.assume-item:last-child { border-bottom: none; }
+.assume-item::before {
+  content: "▹"; position: absolute; left: 2px;
+  color: var(--acc);
+}
+/* 思想の注記（正しい答えではなく、問い） */
+.spec-note {
+  margin-top: 3.5vh; font-size: 12px; line-height: 2.3;
+  letter-spacing: 0.1em; color: var(--text-dim);
+  text-align: center;
+}
+/* 生成された問いの表示パネル */
+.gen-question {
+  width: min(720px, 88vw);
+  margin-top: 4vh; padding: 42px 36px;
+  border: 1px solid color-mix(in srgb, var(--acc) 55%, transparent);
+  background: rgba(8,14,26,0.8);
+  box-shadow: 0 0 44px color-mix(in srgb, var(--acc) 12%, transparent);
+  text-align: center;
+}
+.gen-question .q {
+  font-size: clamp(17px, 1.9vw, 22px);
+  font-weight: 300;
+  line-height: 2.2; letter-spacing: 0.08em;
+  color: var(--text);
+}
+.gen-question .sub {
+  margin-top: 24px; font-size: 12px; line-height: 2.2;
+  letter-spacing: 0.06em; color: var(--text-dim);
+  border-top: 1px dashed var(--line); padding-top: 18px;
+}
+
+/* STAGE INTRO の通信シグナル表記 */
+.intro-signal {
+  margin-top: 5vh;
+  display: flex; align-items: center; gap: 12px;
+  font-size: 11px; letter-spacing: 0.4em;
+  color: var(--text-dim);
+}
+.intro-signal .blink-dot { background: var(--acc); box-shadow: 0 0 12px var(--acc); }
+
+/* ---------- 2050への通信UI（プロンプト送信） ---------- */
+.comm-panel {
+  width: min(760px, 86vw);
+  background: rgba(8,14,26,0.85);
+  border: 1px solid var(--line); border-radius: 6px;
+  overflow: hidden;
+}
+.comm-head {
+  border-bottom: 1px solid var(--line);
+  padding: 22px 32px;
+  background: rgba(14,22,38,0.6);
+}
+.comm-head .hud-row { line-height: 2.2; }
+.comm-body { padding: 26px 32px 32px; }
+.comm-note {
+  font-size: 13px; letter-spacing: 0.06em; line-height: 2;
+  color: var(--text-dim); margin-bottom: 18px;
+}
+.comm-panel textarea {
+  width: 100%; min-height: 170px;
+  background: rgba(4,8,16,0.8);
+  border: 1px solid var(--line); border-radius: 4px;
+  color: var(--text); font-family: inherit;
+  font-size: clamp(16px, 1.5vw, 20px);
+  line-height: 2; letter-spacing: 0.05em;
+  padding: 24px 28px; resize: vertical;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.comm-panel textarea:focus {
+  outline: none; border-color: var(--acc);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--acc) 20%, transparent);
+}
+.comm-panel textarea::placeholder { color: rgba(143,164,181,0.45); }
+
+/* ---------- 送信演出 ---------- */
+.transmit-text {
+  font-size: clamp(20px, 2.4vw, 32px);
+  letter-spacing: 0.3em; text-indent: 0.3em;
+  color: var(--mint); text-align: center;
+  animation: logoPulse 1.2s ease-in-out infinite;
+}
+
+/* ---------- LIFE ARCHIVE カード ---------- */
+.hint-grid { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 900px) { .hint-grid { grid-template-columns: 1fr; } }
+.hint-card { cursor: default; gap: 12px; }
+.hint-card:hover { transform: none; box-shadow: none; border-color: var(--line); }
+.hint-age {
+  font-size: 24px; font-weight: 200; letter-spacing: 0.1em; color: var(--acc);
+  display: flex; align-items: baseline; gap: 14px;
+}
+.hint-age small { font-size: 11px; letter-spacing: 0.3em; color: var(--text-dim); }
+.hint-field { font-size: 13px; line-height: 1.9; color: var(--text-dim); letter-spacing: 0.03em; }
+.hint-field b { color: var(--blue-pale); font-weight: 400; }
+.hint-note {
+  margin-top: 6px; border-top: 1px solid var(--line); padding-top: 14px;
+  font-size: clamp(13px, 1.15vw, 16px); line-height: 2;
+  color: var(--text); letter-spacing: 0.04em; white-space: pre-wrap;
+}
+.hint-reply {
+  margin-top: 6px;
+  font-size: 12px; line-height: 2; letter-spacing: 0.03em;
+  color: color-mix(in srgb, var(--acc) 75%, white);
+  border-left: 2px solid color-mix(in srgb, var(--acc) 45%, transparent);
+  padding-left: 14px;
+}
+
+/* ---------- 総括・最終画面 ---------- */
+.ending-text { max-width: 720px; text-align: center; }
+.ending-text p {
+  font-size: clamp(15px, 1.45vw, 19px);
+  line-height: 2.5; letter-spacing: 0.07em;
+  margin-bottom: 2.2em;
+}
+.ending-text p.dim { color: var(--text-dim); }
+
+.footnote {
+  position: fixed; bottom: 18px; left: 0; right: 0;
+  text-align: center; font-size: 10px; letter-spacing: 0.4em;
+  color: rgba(143,164,181,0.35); pointer-events: none;
+}
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+<div class="footnote">FUTURE SIMULATOR — LIFE DESIGN TRANSMISSION SYSTEM / 2026 ⇄ 2050</div>
+
+<script>
+/* ============================================================
+   シナリオデータ（台詞・断片・反応はすべてここで編集できます）
+   ============================================================ */
+
+/* 18歳のミナト：オープニング録画メッセージ
+   （1要素 = 1ブロック。会話ウィンドウにタイプライター表示され、
+     クリックで全文表示 → もう一度クリックで次のブロックへ） */
+const MINATO_OPENING = [
+  "──録画スタート。",
+  "あ、繋がった！\nはじめまして。2050年からアクセスしています。\n18歳のミナトです。",
+  "まさか、24年前の人にメッセージを送れるサービスがあるなんて、\n正直、まだ半信半疑なんですけど……届いてますか？",
+  "僕の人生は、たぶん失敗していません。\nでも、失敗していない人生が、\nこんなに不安になるなんて思いませんでした。",
+  "実は、僕らの時代では、\nAIが「最適な人生」をほとんど決めてくれます。\n進路も、仕事も、住む場所も、\n誰と関係を結ぶべきかさえ、\n失敗しないように提案してくれる。",
+  "僕もその通りに生きてきました。\n大きな失敗はありませんでした。\n……でも最近、すごくモヤモヤするんです。",
+  "間違えてはいない。\nでも、自分で選んだ気がしない。\nレールを歩いているだけなんじゃないかって。",
+  "だから、まだ「人間が不合理に選ぶ楽しさ」が残っていた時代のあなたに、\n初めてこのサービスを使ってSOSを送ってみました。",
+  "あなたへのお願いです。\n今、あなたがいる時代から、\n僕が選び直すための「問い」を残していってください。\n2050年の僕は、必ずそれを受け取ります。",
+  "初めての挑戦が、\n画面の向こうのあなたに届きますように。\n……待っています。",
+  "──録画、終了。"
+];
+
+/* 起動画面のブートログ */
+const BOOT_LINES = [
+  "CONNECTING TO LIFE ARCHIVE...",
+  "RECONSTRUCTING POSSIBLE LIFE PATHS...",
+  "ACCESSING ENVIRONMENTAL VARIABLES...",
+  "OPENING SIMULATION LAYER..."
+];
+
+/* システム説明（1要素 = 1ブロック） */
+const SYSTEM_LINES = [
+  "FUTURE SIMULATORへようこそ。",
+  "あなたはこれから、\nミナトの人生に直接介入するのではなく、\n彼が選び直すための問いを残します。\n正しい答えではなく、問いを。\n助言ではなく、違和感を。",
+  "各ステージでは、\nミナトから届いた生活記録を確認し、\n未来社会の環境圧を読み取り、\nひとつの未来分岐を検証します。\nあなたが抱いた違和感は、\n2050年のミナトへ送信されます。",
+  "重要なのは、最終的なシミュレーション結果だけではありません。\nあなたがどの未来に違和感を覚えたのか。\nどの人生に可能性を感じたのか。\nその視点そのものが、\nミナトにとって、まだ見ぬ選択肢になります。",
+  "それでは、シミュレーションを開始します。"
+];
+
+/* 問い送信時の通信ログ */
+const TRANSMIT_LINES = [
+  "TRANSMITTING TO 2050...",
+  "SIGNAL CONVERTING...",
+  "TIME LAG DETECTED...",
+  "PROMPT ARCHIVED...",
+  "DELIVERY STATUS：PENDING"
+];
+
+/*
+  STAGEデータ（全ステージ共通の形式）
+  - accent          : ステージごとのアクセント色（UIモチーフの雰囲気を変える）
+  - introLines      : STAGE INTROのシステム導入（1要素 = 1ブロック）
+  - motif           : ステージ固有のHUDパネル（UIモチーフ）
+  - scene           : ミナトの現在の生活シーン（叙述）
+  - records         : 部屋で確認できる記録3種（1つ以上確認すると先へ進める）
+                      kicker/title/label ＋ body（本文）/ list（箇条書き）/
+                      memo＋memoLabel（引用）/ note（欄外注記）
+  - consult         : ミナトからの相談（1要素 = 1ブロック。タイプライター表示）
+  - lenses          : SIMULATION LENS 3種（desc＝説明、question＝問い）
+  - fragmentsByLens : レンズ別のLIFE FRAGMENT { A:[...], B:[...], C:[...] }
+                      各断片は code/title/summary/docTitle/body/feeling
+  - speculativeByLens : レンズ別の「前提と問い」 { A:{...}, B:{...}, C:{...} }
+                      assumptions＝この未来で当たり前になっている前提（text）と、
+                      それを疑ったときに生成される問い（question）のペア。
+                      losses＝その前提によって失われそうなものの候補。
+  - responsesByLens : レンズ別のミナトの反応 { A:[...], B:[...], C:[...] }
+*/
+const STAGES = [
+  /* ---------------- STAGE 1 : Age 20 ---------------- */
+  {
+    stageNumber: 1,
+    age: 20,
+    theme: "最適化された未来で、自分で迷う意味はあるのか。",
+    accent: "#6fd7ff",
+    /* STAGE INTROで表示されるシステムテキスト（1要素 = 1ブロック） */
+    introLines: [
+      "STAGE 1：Age 20。\nこれより、20歳のミナトの人生分岐に接続します。",
+      "この年代の主な分岐点は、進路、学び、働き方、住む場所です。",
+      "未来社会では、AIが個人の適性、家庭環境、健康状態、社会需要をもとに、\n失敗確率の低い人生設計を提示します。\nしかし、最適な人生が、\n本人にとって納得できる人生であるとは限りません。",
+      "ミナトの現在の生活記録を開きます。"
+    ],
+    motif: {
+      name: "進路推薦インターフェース",
+      title: "LIFE DESIGN RECOMMENDATION",
+      rows: [
+        ["AGE", "20"],
+        ["STATUS", "RECOMMENDATION PENDING"],
+        ["RECOMMENDED PATH", "環境適応設計士"],
+        ["SUPPORT", "奨学金・住居支援・生活保証 対象"],
+        ["DEVIATION WARNING", "ON", "warn"]
+      ]
+    },
+    scene: [
+      "20歳のミナトは、AIから進路推薦を受け取っています。\n推薦に従えば、奨学金、住居支援、生活保証が受けられます。\n推薦外の進路を選ぶと、支援が減り、生活は不安定になります。",
+      "机の上には、AIが推薦した進路通知。\nその横には、ミナトが誰にも見せていない\n音や記憶に関する個人的な記録があります。"
+    ],
+    /* 部屋の中で確認できる記録（少なくとも1つ確認すると先へ進める） */
+    records: [
+      {
+        id: "R1",
+        label: "AI推薦通知",
+        kicker: "RECORD 1 — OFFICIAL NOTICE",
+        title: "進路推薦通知",
+        body: [
+          "推薦進路：環境適応設計士",
+          "この進路は、今後30年間の都市環境変化、気候適応需要、居住地再編計画に基づき、ミナトに推奨されています。",
+          "推薦に従う場合、学費補助、居住地支援、就労接続プログラムが適用されます。",
+          "推薦外の進路を選ぶ場合、一部の支援対象から外れる可能性があります。"
+        ],
+        note: "これは命令ではありません。\nただし、社会制度上、推奨進路を選ぶ方が安定した生活設計が可能です。"
+      },
+      {
+        id: "R2",
+        label: "ミナトの個人的な記録",
+        kicker: "RECORD 2 — PRIVATE ARCHIVE",
+        title: "未分類の音声記録",
+        list: [
+          "雨の日の高架下の反響",
+          "解体予定の団地で録った生活音",
+          "祖母の声を真似る古いAI玩具",
+          "誰も使わなくなった駅のアナウンス",
+          "眠る前に聞こえる自分の呼吸"
+        ],
+        memoLabel: "ミナトのメモ",
+        memo: [
+          "これは、何の役に立つんだろう。",
+          "でも、消せない。",
+          "AIに進路相談したら、\n「職能接続性が低い関心」と言われた。",
+          "それでも、なぜかこっちの方が、\n自分に近い気がする。"
+        ]
+      },
+      {
+        id: "R3",
+        label: "未送信メッセージ",
+        kicker: "RECORD 3 — UNSENT MESSAGE",
+        title: "宛先：未設定",
+        memo: [
+          "ねえ。",
+          "もし、将来の役に立つかどうか分からないものを選ぶとしたら、\nそれって無責任なのかな。",
+          "僕は失敗したいわけじゃない。",
+          "でも、失敗しないように選び続けたら、\n自分で選んだ記憶がなくなる気がする。",
+          "このまま推薦に従ったら、\nたぶん安心する。",
+          "でも、安心したまま、\n何かを置いていく気もする。"
+        ],
+        note: "送信されていません。"
+      }
+    ],
+    consult: [
+      "この画面、ずっと閉じられないんです。",
+      "たぶん、従った方がいいんだと思います。\n失敗しないって、悪いことじゃないし。\n支援も受けられる。住む場所も決まる。\n将来の仕事にもつながる。",
+      "でも……\nこの選択をしたあと、\n僕はちゃんと「自分で選んだ」って思えるんでしょうか。",
+      "僕の時代では、\n迷わないことが優しさだと言われます。\n迷わなくていいように、\n誰かが先に道を整えてくれる。",
+      "でも、あなたの時代には、\nまだ遠回りとか、寄り道とか、\n理由の分からない選択があったんですよね。\n役に立つか分からないものを選ぶって、\nどういう感じだったんですか。",
+      "僕は、\nこのまま間違えずに進むのが怖いです。\nあなたなら、\nこの迷いをどこから見ますか。"
+    ],
+    lenses: [
+      { id: "A", title: "AI進路推薦が標準化された社会",
+        desc: "進学先、職業、居住地までAIが推奨する。\n失敗は減ったが、偶然の選択も減っている。\nこの社会では、進路は本人が考える前に、制度とデータによってほとんど整えられている。",
+        question: "人は、失敗しない道を与えられたとき、\nそれでも自分で選んだと言えるのか。" },
+      { id: "B", title: "気候変動によって住む場所が流動化した社会",
+        desc: "暑さ、災害、保険料によって、若者の居住地選択が制限されている。\n住みたい場所よりも、安全に暮らせる場所が優先される。\nこの社会では、進路は職業だけでなく、どこで生きられるかによって決まっていく。",
+        question: "人は、住む場所を選べないとき、\nどのように自分の人生を選ぶのか。" },
+      { id: "C", title: "労働の一部をAIエージェントが代行する社会",
+        desc: "人間は働かなくても最低限暮らせる。\nしかし、自分の役割を見つけにくくなっている。\nこの社会では、「何者になるか」よりも、「何に関わるか」が問われている。",
+        question: "働かなくても生きられるとき、\n人は何によって社会とつながるのか。" }
+    ],
+    /* レンズごとに異なるLIFE FRAGMENT（人生のメディア断片）
+       docTitle は通知・フォルダ・ログなど「書類としての見出し」 */
+    fragmentsByLens: {
+      A: [
+        { code: "A-1", title: "推薦された進路を選んだミナト",
+          summary: "ミナトはAIが示した進路に従い、環境適応設計士のプログラムへ進む。",
+          docTitle: "進路確定通知",
+          body: [
+            "ミナトは、AIが推薦した環境適応設計士の育成プログラムに進んだ。",
+            "手続きは驚くほど簡単だった。\n奨学金は自動承認され、住居は大学近くに割り当てられ、就労先の候補まで提示された。",
+            "誰も反対しなかった。\nむしろ、周囲は安心した。",
+            "「よかったね」\n「これなら大丈夫だね」\n「ちゃんと選べて偉いね」",
+            "けれどミナトは、その言葉を聞くたびに少しだけ返事が遅れた。",
+            "本当に選んだのだろうか。\nそれとも、選ばなくて済む道を進んだだけなのだろうか。",
+            "数年後、ミナトは安定した生活を手に入れる。\n大きな失敗はない。\n生活にも困らない。",
+            "ただ、自分の人生を思い出そうとすると、\n最初に浮かぶのは、自分の意思ではなく、\nあの進路推薦画面だった。"
+          ],
+          feeling: "間違えないことと、\n生きている実感があることは、\n同じではない。" },
+        { code: "A-2", title: "推薦外の道を選んだミナト",
+          summary: "ミナトは推薦外の分野へ進み、生活支援の一部を失う。",
+          docTitle: "支援対象外通知",
+          body: [
+            "ミナトは、AIが推薦した進路を選ばなかった。",
+            "代わりに選んだのは、音、記憶、場所の記録に関する小さな研究プログラムだった。",
+            "手続き画面には、何度も警告が表示された。",
+            "推薦進路から外れています。\n一部の生活支援が適用されません。\n将来接続可能な職能が限定される可能性があります。",
+            "それでもミナトは、画面を閉じなかった。",
+            "生活は少し不安定になった。\n同じ年齢の人たちより、住む場所も、収入も、将来の見通しも曖昧だった。",
+            "けれどミナトは初めて、\n自分の言葉で自分の選択を説明しなければならなくなった。",
+            "「なぜそれを選んだのか」",
+            "その問いに答えるたび、\nミナトは少しずつ、自分の輪郭を知っていった。"
+          ],
+          feeling: "迷うことは、\n失敗の前兆ではなく、\n自分の輪郭を確かめる時間だった。" },
+        { code: "A-3", title: "二つの道を保留したミナト",
+          summary: "ミナトは推薦進路に進みながら、個人的な記録を続ける。",
+          docTitle: "未分類フォルダ",
+          body: [
+            "ミナトは、AIが推薦した進路に進んだ。",
+            "ただし、完全には従わなかった。",
+            "昼は環境適応設計の授業を受け、\n夜になると、誰にも提出しない音の記録を続けた。",
+            "高架下の反響。\n雨水の流れる音。\n再開発で消える商店街のシャッター音。\n古い家の冷蔵庫の低い振動。",
+            "それらは、成績にも職能にもつながらなかった。",
+            "けれどミナトは、\nその記録を消せなかった。",
+            "推薦された人生を生きながら、\n推薦されなかった自分も、どこかに残しておく。",
+            "それは逃げでも、妥協でもなく、\nまだ決めきれない自分を守る方法だった。"
+          ],
+          feeling: "ひとつに決めないことも、\n人生を引き延ばすための選択だった。" }
+      ],
+      B: [
+        { code: "B-1", title: "安全な都市へ移ったミナト",
+          summary: "気候リスクを避け、AIが指定した安全都市へ移住する。",
+          docTitle: "居住地再配置通知",
+          body: [
+            "ミナトは、気候リスクの低い都市への移住を受け入れた。",
+            "暑さ、浸水、保険料、交通インフラ、医療アクセス。\nすべての条件を計算した結果、その都市は「もっとも安全」とされた。",
+            "新しい部屋は快適だった。\n空調は安定し、移動も効率的で、災害時の避難経路も最初から設定されていた。",
+            "ただ、ミナトはときどき、\n自分が選んだ場所ではなく、\n自分を安全に保つために選ばれた場所に住んでいる気がした。",
+            "窓の外の景色は美しかった。\nでも、そこに自分の記憶はまだなかった。"
+          ],
+          feeling: "安全な場所にいることと、\nそこを自分の場所だと思えることは、\n同じではない。" },
+        { code: "B-2", title: "リスクのある場所に残ったミナト",
+          summary: "ミナトは気候リスクのある街に残り、自分の記憶と場所を優先する。",
+          docTitle: "移住勧告の保留",
+          body: [
+            "ミナトは、移住勧告を保留した。",
+            "その街は、以前より暑くなっていた。\n夏の昼間に歩く人は減り、古い建物には冷却シェルターの案内が貼られていた。",
+            "それでもミナトは、その場所からすぐに離れられなかった。",
+            "小さい頃に通った道。\n何度も録音した高架下。\n祖母と歩いた商店街。\n誰にも説明できない、身体が覚えている地図。",
+            "そこに残ることは合理的ではなかった。",
+            "けれどミナトは、\n自分がどこでできているのかを、\n簡単に手放せなかった。"
+          ],
+          feeling: "場所は、\n安全性だけで選ぶものではなく、\n自分の記憶が沈んでいる身体の一部だった。" },
+        { code: "B-3", title: "移動し続ける生活を選んだミナト",
+          summary: "ミナトは一つの場所に定住せず、季節や気候に応じて住む場所を変える。",
+          docTitle: "可変居住プラン",
+          body: [
+            "ミナトは、固定された居住地を持たない生活を選んだ。",
+            "春は北の共同住宅。\n夏は地下冷却都市。\n秋は沿岸部の観測拠点。\n冬は古い住宅地のシェアユニット。",
+            "気候に合わせて暮らしを移動させることは、合理的だった。",
+            "けれど、荷物を減らすたびに、\nミナトは自分の輪郭まで薄くなるように感じた。",
+            "どこにでも行ける。\nでも、どこに帰ればいいのか分からない。",
+            "移動の自由は、\n帰る場所の不在と隣り合わせだった。"
+          ],
+          feeling: "自由に動けることと、\n帰る場所があることは、\n別の安心だった。" }
+      ],
+      C: [
+        { code: "C-1", title: "AIエージェントに任せたミナト",
+          summary: "ミナトは自分の代理AIに進路形成と仕事接続を任せる。",
+          docTitle: "代理エージェント起動ログ",
+          body: [
+            "ミナトは、自分の特性を学習したAIエージェントを起動した。",
+            "エージェントは、履修計画を整理し、将来の仕事候補に連絡し、ミナトの代わりに小さなプロジェクトへ参加し始めた。",
+            "ミナトが迷っている間にも、\nエージェントは前に進んでいった。",
+            "便利だった。\n遅れを取らずに済んだ。\n自分が止まっていても、人生が進んでいく感覚があった。",
+            "けれど、ある日ミナトは、\n自分の名前で送られたメッセージを読み返して、\n少しだけ怖くなった。",
+            "これは本当に自分の言葉なのか。\nそれとも、自分に似た誰かの言葉なのか。"
+          ],
+          feeling: "人生が進んでいることと、\n自分が進んでいることは、\n同じではない。" },
+        { code: "C-2", title: "働かない時間を受け入れたミナト",
+          summary: "ミナトはすぐに職能化せず、何にも接続しない時間を持つ。",
+          docTitle: "未接続期間",
+          body: [
+            "ミナトは、すぐに進路や職能へ接続しなかった。",
+            "生活は最低限支えられていた。\nだから、働かない時間を持つことは可能だった。",
+            "最初の数日は、自由だった。",
+            "朝起きても、急ぐ必要がない。\n誰かに成果を見せる必要もない。\nAIからの提案を閉じても、生活は続く。",
+            "けれど、その自由はすぐに不安に変わった。",
+            "何もしていない自分は、\n本当にここにいていいのだろうか。",
+            "働かなくても生きられる社会で、\nミナトは初めて、\n働くことが収入以外の何かでもあったことに気づく。"
+          ],
+          feeling: "働くことは、\n生活費を得ることだけではなく、\n誰かに呼ばれる場所を持つことでもあった。" },
+        { code: "C-3", title: "役に立たないプロジェクトを始めたミナト",
+          summary: "ミナトはAIが価値を判定しにくい、小さな記録プロジェクトを始める。",
+          docTitle: "公共性未判定プロジェクト",
+          body: [
+            "ミナトは、役に立つか分からないプロジェクトを始めた。",
+            "消えていく場所の音を集める。\n誰かの生活の気配を記録する。\n再開発の前に、意味のない風景を残す。",
+            "AIは、その活動を「公共性未判定」と分類した。",
+            "収益性は低い。\n社会実装可能性も不明。\n職能接続性も曖昧。",
+            "けれど、少しずつ人が集まり始めた。",
+            "「そこ、私も知ってる」\n「その音、昔よく聞いた」\n「なくなる前に、聞けてよかった」",
+            "役に立つか分からないものが、\n誰かの記憶をほどくことがあった。"
+          ],
+          feeling: "意味は、\n最初から証明されるものではなく、\n誰かに届いたあとで生まれることがある。" }
+      ]
+    },
+    /* LIFE DESIGN PROMPT：この未来で当たり前になっている前提と、疑ったときに生まれる問い */
+    speculativeByLens: {
+      A: {
+        assumptions: [
+          { text: "失敗しない進路が、よい進路である",
+            question: "失敗しない人生は、\n本当に本人の人生と言えるのか？" },
+          { text: "選択は、データが本人より正しく行える",
+            question: "自分より正しい他者に囲まれたとき、\n「選ぶ」という行為はどこに残るのか？" },
+          { text: "迷う時間は、削減すべきコストである",
+            question: "迷いを省いた人生に、\nあとから思い出せる岐路は残るのか？" },
+          { text: "適性は、選ぶ前に決まっている",
+            question: "適性の外側にある関心を、\n誰が拾い上げるのか？" }
+        ],
+        losses: [
+          "自分で選んだという記憶",
+          "遠回りの経験",
+          "失敗からしか得られない身体感覚",
+          "理由を説明できないまま選ぶ自由",
+          "岐路に立ったときの緊張感",
+          "向いていないことに挑む時間"
+        ]
+      },
+      B: {
+        assumptions: [
+          { text: "住む場所は、安全性で決めるべきである",
+            question: "安全のためだけに選ばれた場所は、\nいつか「故郷」になれるのか？" },
+          { text: "土地への愛着は、リスク判断より軽い",
+            question: "数値にならない愛着は、\n人生の設計から外してよいものなのか？" },
+          { text: "移動できることは、常に自由である",
+            question: "いつでも移動できる人生に、\n帰る場所は育つのか？" },
+          { text: "場所の記憶は、データで代替できる",
+            question: "身体が覚えている場所を失ったとき、\n人は何をもとに自分を思い出すのか？" }
+        ],
+        losses: [
+          "身体に染みついた土地の記憶",
+          "理屈に合わない場所への愛着",
+          "帰る場所があるという感覚",
+          "不便な土地で育つ関係",
+          "風景と結びついた自分の歴史",
+          "「ここにいたい」というだけの理由"
+        ]
+      },
+      C: {
+        assumptions: [
+          { text: "役に立つことが、社会とつながる条件である",
+            question: "役に立たない関心は、\n本当に人生から省いてよいものなのか？" },
+          { text: "何者かにならなければ、居場所はない",
+            question: "何者でもない時間を、\n人はどれくらい許されているのか？" },
+          { text: "成果の出ない活動は、続ける意味がない",
+            question: "誰にも届かないまま続けたことは、\n無かったことになるのか？" },
+          { text: "貢献は、測定できるものだけが認められる",
+            question: "測られない貢献は、\n誰の記憶に残るのか？" }
+        ],
+        losses: [
+          "役に立たない関心",
+          "誰にも説明できない欲望",
+          "結果の出ない時間を過ごす自由",
+          "無意味なことに没頭する喜び",
+          "「まだ何者でもない」という余白",
+          "損得の外にあるつきあい"
+        ]
+      }
+    },
+    /* レンズごとに異なるミナトの反応（1要素 = 1ブロック） */
+    responsesByLens: {
+      A: [
+        "……そっか。",
+        "僕は、失敗しないことばかり考えていたけど、\nあなたの時代では、迷うことも生活の一部だったんですね。\n選ばないで済むことを、\nずっと優しさだと思っていました。",
+        "でも、選ぶ怖さを避け続けたら、\n自分の人生を思い出せなくなるのかもしれない。\n少し怖いけど、\nその怖さを避けすぎないようにしてみます。"
+      ],
+      B: [
+        "あなたの言葉を読んで、\n場所って、ただ安全に暮らすための条件じゃないんだと思いました。",
+        "僕は、どこに住むべきかばかり考えていたけど、\nどこで自分ができてきたのかは、\nあまり考えていなかったかもしれません。",
+        "移動しても、残っても、\n自分の記憶を置いていかない方法を探してみます。"
+      ],
+      C: [
+        "僕は、何者になるかを急ぎすぎていたのかもしれません。",
+        "働かなくてもいい社会で、\nそれでも何かに関わりたいと思うこと。\n役に立つか分からないものを、\n誰かに届くまで続けてみること。\nそれも、社会とつながる方法なんですね。",
+        "少しだけ、\n自分の小さな関心を信じてみたいです。"
+      ]
+    }
+  },
+
+  /* ---------------- STAGE 2 : Age 40 ---------------- */
+  {
+    stageNumber: 2,
+    age: 40,
+    theme: "社会に適応することと、自分の生活を持つことは両立するのか。",
+    accent: "#7df0d4",
+    introLines: [
+      "STAGE 2：Age 40。\nこれより、40歳のミナトの人生分岐に接続します。",
+      "この年代の主な分岐点は、働き方、共に暮らす相手、身体との付き合い方です。",
+      "未来社会では、生活の多くがLIFE OSによって調整され、\n破綻のない毎日が維持されています。\nしかし、整えられた生活の中で、\n本人の輪郭は少しずつ曖昧になることがあります。",
+      "ミナトの現在の生活記録を開きます。"
+    ],
+    motif: {
+      name: "生活OSダッシュボード",
+      title: "LIFE OS",
+      rows: [
+        ["AGE", "40"],
+        ["WORK", "AI AGENT DELEGATED"],
+        ["HEALTH", "STABLE"],
+        ["RELATIONSHIP", "UNCLASSIFIED"],
+        ["FOOD / SLEEP", "OPTIMIZED"],
+        ["EMOTIONAL VARIANCE", "DETECTED", "warn"]
+      ]
+    },
+    scene: [
+      "40歳のミナトは、仕事、身体、関係性、暮らしのバランスに向き合っています。\n仕事の多くはAIエージェントが代行し、食事や睡眠も最適化されています。",
+      "生活は安定している一方で、ミナトは\n「自分がいなくても、この生活は回ってしまうのではないか」と感じています。\n机の上のダッシュボードには、今日も異常なし。\nその横に、いくつかの記録が残されています。"
+    ],
+    records: [
+      {
+        id: "R1",
+        label: "LIFE OSからの定期報告",
+        kicker: "RECORD 1 — WEEKLY REPORT",
+        title: "生活最適化レポート",
+        body: [
+          "今週の業務の大部分は、AIエージェントによって遅延なく処理されました。\nミナトによる直接対応が必要な事案はありませんでした。",
+          "食事・睡眠・運動は、推奨レンジ内に維持されています。",
+          "感情変動がわずかに検出されました。\n原因は特定されていません。\n生活への影響は軽微と判断されます。"
+        ],
+        note: "対応は不要です。\nこのレポートは、確認されなくても生活に影響しません。"
+      },
+      {
+        id: "R2",
+        label: "ミナトの個人的な記録",
+        kicker: "RECORD 2 — PRIVATE ARCHIVE",
+        title: "使われていない献立メモ",
+        list: [
+          "祖母から教わった、分量の曖昧な煮物のレシピ",
+          "うまく作れなかった日の書き込み",
+          "誰かに食べさせたい料理の走り書き",
+          "最適化前に通っていた市場の買い物メモ",
+          "「今日は失敗してもいい日」と書かれたページ"
+        ],
+        memoLabel: "ミナトのメモ",
+        memo: [
+          "栄養は、キッチンプリンタの方が正確に管理できる。",
+          "でも、たまに、手で作りたくなる。",
+          "AIには「非効率な調理習慣」と分類された。",
+          "非効率で、いいんだけどな。"
+        ]
+      },
+      {
+        id: "R3",
+        label: "未送信メッセージ",
+        kicker: "RECORD 3 — UNSENT MESSAGE",
+        title: "宛先：未設定",
+        memo: [
+          "最近、鏡を見ると、\n生活に合わせて作られた人みたいな顔をしてる。",
+          "予定は埋まってるのに、\n思い出せる一日がない。",
+          "誰かに「最近どう？」って聞かれたら、\n何て答えるんだろう。",
+          "順調だよ、って言うと思う。",
+          "それ以外の言葉を、\n長いこと使っていない気がする。"
+        ],
+        note: "送信されていません。"
+      }
+    ],
+    consult: [
+      "全部、うまく回ってるんです。",
+      "仕事はAIが進めてくれる。\n食事も、睡眠も、体調も安定してる。\n昔より自由な時間も増えました。",
+      "でも最近、\n僕がいなくてもこの生活は続くんじゃないかって思うんです。\n便利になったのに、\n自分が少しずつ薄くなっている感じがする。",
+      "予定通りの一日が終わるたびに、\n今日は僕じゃなくてもよかったんじゃないかって。\n……そういうこと、考えたことありますか。",
+      "あなたの時代の生活には、\nまだ無駄とか、手間とか、\n面倒な関わり合いが残っていたんですよね。\nそれって、大変でしたか。\nそれとも──大事でしたか。",
+      "こういう時、\n人は何を手放しちゃいけないんでしょうか。\nあなたなら、この生活のどこを見ますか。"
+    ],
+    lenses: [
+      { id: "A", title: "AIエージェントが複数の仕事を代行する社会",
+        desc: "仕事の多くはAIエージェントが実行し、人間は意思決定と関係調整を担う。\n収入は安定したが、自分が社会に必要とされている感覚が薄れている。\nこの社会では、働くことと、存在することの結び目がほどけかけている。",
+        question: "仕事が自分の手を離れていくとき、\n人は何をもって「働いた」と言えるのか。" },
+      { id: "B", title: "家族制度が多様化した社会",
+        desc: "血縁や婚姻に限らない共同生活、共同育児、ケア契約が広がっている。\n誰と生きるかは、制度よりも日々の合意によって決まる。\nこの社会では、関係の形は自由になったが、その分、自分で結び直し続ける必要がある。",
+        question: "制度で説明できない関係は、\n何によって続いていくのか。" },
+      { id: "C", title: "食と健康が完全にデータ管理された社会",
+        desc: "食事、睡眠、運動、感情の波までデータで調整される。\n身体は安定したが、欲望や不調の意味が見えにくくなっている。\nこの社会では、身体は守られるほど、遠くなっていく。",
+        question: "身体が常に正しく保たれるとき、\n欲望はどこへ行くのか。" }
+    ],
+    fragmentsByLens: {
+      A: [
+        { code: "A-1", title: "仕事をすべて任せたミナト",
+          summary: "ミナトは残っていた業務判断も、すべてエージェントに委ねる。",
+          docTitle: "業務委任完了通知",
+          body: [
+            "ミナトは、残っていた業務判断もエージェントに委ねた。\n生活は静かになった。\n収入は変わらず、成果は上がり続けた。",
+            "同僚とのやりとりは減り、\n会議は要約になって届くようになった。",
+            "ある日、プロジェクトが大きな成果を挙げた。\n祝福のメッセージは、エージェント宛てに届いた。",
+            "ミナトはそれを、\n少し離れた場所から読んだ。",
+            "数年後、時間は十分にある。\nけれど、その時間に呼ばれる名前がない。"
+          ],
+          feeling: "楽になることと、\nいなくてもよくなることは、\n紙一重だった。" },
+        { code: "A-2", title: "一部の仕事を手元に残したミナト",
+          summary: "ミナトは、任せられる仕事の一部を、あえて自分の手に残す。",
+          docTitle: "非効率業務継続申請",
+          body: [
+            "ミナトは、エージェントに任せられる仕事の一部を、\nあえて自分の手に残した。",
+            "処理は遅くなった。\nミスも起きた。\nシステムからは「非効率な業務配分」と繰り返し通知された。",
+            "けれど、自分の手で終わらせた仕事のあとには、\n疲れと一緒に、確かに一日があった。",
+            "同僚との些細なやりとりも戻ってきた。\n報告ではなく、雑談が。",
+            "効率は落ちた。\n思い出せる日は、増えた。"
+          ],
+          feeling: "手間は、\n生活が自分のものである証拠でもあった。" },
+        { code: "A-3", title: "任せ方を選び直し続けたミナト",
+          summary: "何を任せ、何を手放さないかを、定期的に自分で決め直すことにする。",
+          docTitle: "業務再配分ログ",
+          body: [
+            "ミナトは、何を任せ、何を手放さないかを、\n定期的に自分で決め直すことにした。",
+            "判断は面倒だった。\n基準は毎回揺れた。\n正解は最後まで分からなかった。",
+            "それでも、「これは任せる」と自分で言えた仕事は、\n任せたあとも、自分の仕事のような気がした。",
+            "エージェントは少しずつ道具に戻り、\n生活の主語が、少しずつ自分に戻ってきた。"
+          ],
+          feeling: "何を任せるかを選べるうちは、\nまだ人生の側にいられる。" }
+      ],
+      B: [
+        { code: "B-1", title: "契約でつながる共同体を選んだミナト",
+          summary: "血縁でも婚姻でもない人たちとケア契約を結び、共同で暮らし始める。",
+          docTitle: "ケア契約更新通知",
+          body: [
+            "ミナトは、血縁でも婚姻でもない人たちとケア契約を結び、\n共同で暮らし始めた。",
+            "契約には、看病、緊急連絡、生活費の分担が明記されていた。\n関係は、書類の上では明確だった。",
+            "けれど、夜中に誰かの咳が聞こえたとき、\n契約書のことは思い出さなかった。\nただ、様子を見に行った。",
+            "食事を分け合い、予定を気にし合う日々の中に、\n帰っていい場所が生まれていった。",
+            "更新の時期が来るたびに、ミナトは思う。\nこの関係を続けているのは、契約なのか。\nそれとも、日々なのか。"
+          ],
+          feeling: "関係を守っているのは制度ではなく、\n繰り返される小さな行き来だった。" },
+        { code: "B-2", title: "ひとりの生活を選んだミナト",
+          summary: "ミナトは、誰とも暮らさないことを選ぶ。生活は自分のペースで流れる。",
+          docTitle: "単独世帯生活プラン",
+          body: [
+            "ミナトは、誰とも暮らさないことを選んだ。\n生活は、どこまでも自分のペースで流れた。",
+            "孤独ではなかった。\n会いたい人には会えたし、連絡もできた。",
+            "ただ、体調を崩した夜、\n部屋の静けさが急に大きくなった。",
+            "誰かに知らせるほどではない。\nでも、誰にも知られていない。",
+            "回復した朝、ミナトは考えた。\nひとりで生きることと、\n誰にも生活を知られないことは、\n同じではないのかもしれない。"
+          ],
+          feeling: "自由の中にも、\n誰かに生活を知られている安心は、\n別に必要だった。" },
+        { code: "B-3", title: "遠い距離のまま関係を続けたミナト",
+          summary: "大切な人たちと離れて暮らし、通信で関係を続ける。",
+          docTitle: "遠隔世帯登録",
+          body: [
+            "ミナトは、大切な人たちと離れて暮らし、\n映像と定期通信で関係を続けた。",
+            "記念日は同期され、会話は途切れなかった。\n関係は、データの上では良好だった。",
+            "けれど、同じ湯気や、同じ天気を共有していない。\nある日、画面の向こうで相手が笑った理由が、\nすぐには分からなかった。",
+            "距離は、関係を壊さなかった。\nただ、関係の解像度を少しずつ下げた。",
+            "ミナトは、たまに会いに行くことを、\n非効率だと知りながら続けた。"
+          ],
+          feeling: "関係には、\nデータにならない「同じ空気の分量」が必要だった。" }
+      ],
+      C: [
+        { code: "C-1", title: "完全管理を受け入れたミナト",
+          summary: "食事も睡眠も運動も、すべてをプログラムに委ねる。身体は静かになる。",
+          docTitle: "健康最適化プログラム継続確認",
+          body: [
+            "ミナトは、食事も睡眠も運動も、\nすべてをプログラムに委ねた。",
+            "体調は安定し、不調の予兆は先回りして処理された。\n空腹の前に食事が届き、疲れる前に休息が挟まれた。",
+            "身体は、静かだった。",
+            "あまりに静かで、ミナトはときどき、\n自分の身体の声を聞いた記憶を探した。",
+            "何かを猛烈に食べたかった夜。\n眠れないまま考え続けた朝。\nそれらは、もう起こらない。"
+          ],
+          feeling: "不調がないことと、\n身体と一緒に生きていることは、\n違うことだった。" },
+        { code: "C-2", title: "ときどき管理から外れるミナト",
+          summary: "月に何度か、プログラムから外れる日を作る。数値は乱れる。けれど──。",
+          docTitle: "逸脱ログ（許容範囲内）",
+          body: [
+            "ミナトは月に何度か、\nプログラムから外れる日を作ることにした。",
+            "食べたいものを食べ、夜更かしをし、\n意味もなく長い距離を歩く。",
+            "数値は乱れ、翌日には軽い後悔が残る。\nシステムはそれを「許容範囲内の逸脱」と記録した。",
+            "けれどミナトにとって、それは逸脱ではなく、\n身体と話す日だった。",
+            "乱れの中でだけ聞こえる声がある。\nその声を聞いた日は、\n身体がまだ自分のものである感覚が戻ってきた。"
+          ],
+          feeling: "身体は、管理対象ではなく、\n生活が起こる場所だった。" },
+        { code: "C-3", title: "小さな不調と暮らすミナト",
+          summary: "治せると提示された小さな不調のいくつかを、治さないままにする。",
+          docTitle: "未処置項目リスト",
+          body: [
+            "ミナトは、治せると提示された小さな不調のいくつかを、\n治さないままにした。",
+            "古い痛み。天気で変わる気分。疲れやすい午後。\nシステムは、処置を勧め続けた。",
+            "けれど、その不調は、\nミナトにとって身体の記憶でもあった。",
+            "痛む膝は、昔よく歩いた道を覚えている。",
+            "不便さと引き換えに、\n身体は履歴書のように、人生を語った。"
+          ],
+          feeling: "すべてを治すことは、\n身体から物語を消すことでもあった。" }
+      ]
+    },
+    speculativeByLens: {
+      A: {
+        assumptions: [
+          { text: "手を動かさないことが、進歩である",
+            question: "手応えのない仕事を重ねた先に、\n「働いた」という実感は残るのか？" },
+          { text: "効率化された時間は、常に価値がある",
+            question: "空いた時間を埋め続ける人生に、\n退屈から生まれるものは残るのか？" },
+          { text: "判断は、任せられるなら任せた方がいい",
+            question: "小さな判断を手放し続けた人は、\n大きな判断の日に、何を頼るのか？" },
+          { text: "失敗の可能性は、あらかじめ除くべきである",
+            question: "うまくいくと分かっていることだけの毎日を、\n人は自分の仕事と呼べるのか？" }
+        ],
+        losses: [
+          "手を動かして得る手応え",
+          "失敗からしか得られない身体感覚",
+          "自分の判断で決めたという記憶",
+          "仕事の中の無駄話や寄り道",
+          "「自分がやった」と言える瞬間",
+          "退屈な時間から生まれる思いつき"
+        ]
+      },
+      B: {
+        assumptions: [
+          { text: "関係は、更新され続けなければ終わる",
+            question: "更新の手続きがない愛着は、\nもう関係と呼べないのか？" },
+          { text: "共同生活は、合意と契約で設計できる",
+            question: "契約に書けない気配や習慣は、\n誰が引き受けるのか？" },
+          { text: "面倒な関係は、解消した方が健全である",
+            question: "面倒を取り除いた関係に、\n深さは育つのか？" },
+          { text: "誰と生きるかは、いつでも選び直せる",
+            question: "いつでも選び直せる関係の中で、\n「それでも残る」と決めることに、\nどんな意味があるのか？" }
+        ],
+        losses: [
+          "説明できないまま続く関係",
+          "迷惑をかけ合う経験",
+          "合意より先にある習慣や気配",
+          "面倒くささごと引き受ける覚悟",
+          "言葉にしないで通じる時間",
+          "「選び直さない」という選択"
+        ]
+      },
+      C: {
+        assumptions: [
+          { text: "身体は、常に正しく保たれるべきである",
+            question: "不調のひとつもない身体に、\n人生の履歴は刻まれるのか？" },
+          { text: "食事は、栄養の最適化のためにある",
+            question: "誰かと囲む無駄の多い食卓は、\n最適化の外に置いてよいものなのか？" },
+          { text: "欲望は、調整すべきノイズである",
+            question: "調整された欲望は、\nまだ自分の欲望と言えるのか？" },
+          { text: "感情の波は、平らな方がよい",
+            question: "揺れをなくした心は、\n何に感動するのか？" }
+        ],
+        losses: [
+          "理由もなく食べたくなる欲望",
+          "誰かと囲む非効率な食卓",
+          "不調が教えてくれる身体の声",
+          "感情の波と一緒にある実感",
+          "身体で覚えた季節の記憶",
+          "「今日は食べすぎた」と笑う夜"
+        ]
+      }
+    },
+    responsesByLens: {
+      A: [
+        "あなたの言葉を読んで、\n少しだけ分かった気がします。\n僕は、便利さを疑いたかったんじゃなくて、\nその中で自分がどこにいるのかを知りたかったのかもしれません。",
+        "全部を任せないこと。\n手間の中に残る一日を、捨てないでおくこと。\n少し、試してみます。",
+        "生活が整っていることと、\nちゃんと生きていると感じることは、\n同じじゃないんですね。"
+      ],
+      B: [
+        "あなたの言葉を読んで、\n関係って、制度の名前より先に、\n日々の小さな行き来でできているのかもしれないと思いました。",
+        "誰と暮らすかだけじゃなくて、\n誰に生活を知られているか。\nそれも、これから考えてみます。",
+        "面倒な関わり合いを、\n全部は手放さないでおきます。"
+      ],
+      C: [
+        "僕は、身体を\n管理する対象としてしか見ていなかったのかもしれません。",
+        "乱れることも、小さな不調も、\n全部が敵じゃないんですね。\n身体の声を聞く日を、作ってみます。",
+        "数値が静かなことより、\n身体と一緒に生きている感じを、\n大事にしてみたいです。"
+      ]
+    }
+  },
+
+  /* ---------------- STAGE 3 : Age 60 ---------------- */
+  {
+    stageNumber: 3,
+    age: 60,
+    theme: "役割が変わったあと、人は何によって社会とつながるのか。",
+    accent: "#a9c8ff",
+    introLines: [
+      "STAGE 3：Age 60。\nこれより、60歳のミナトの人生分岐に接続します。",
+      "この年代の主な分岐点は、役割の変化、ケアとの関わり、関係の結び直しです。",
+      "未来社会では、ケアは効率化され、\n孤立の予兆はネットワークによって検知されます。\nしかし、支援が届くことと、\n誰かとつながっていることは、同じではありません。",
+      "ミナトの現在の生活記録を開きます。"
+    ],
+    motif: {
+      name: "ケアネットワーク／孤独リスク通知",
+      title: "CARE NETWORK",
+      rows: [
+        ["AGE", "60"],
+        ["CARE PLAN", "AUTO-GENERATED"],
+        ["UNANSWERED MESSAGES", "ACCUMULATING"],
+        ["COMMUNITY ROLE", "UNDEFINED"],
+        ["RELATIONSHIP SIGNAL", "WEAK", "warn"]
+      ]
+    },
+    scene: [
+      "60歳のミナトは、社会的役割の変化と、これからの生き直しに向き合っています。\nこの時代の60歳は、引退ではなく、再び自分の関わり方を選ぶ年齢です。",
+      "しかし、若い頃のように\n常に何かに呼ばれる感覚は薄れています。\n通知は静かになり、部屋には\n返していないメッセージだけが積もっています。"
+    ],
+    records: [
+      {
+        id: "R1",
+        label: "ケアネットワークからの通知",
+        kicker: "RECORD 1 — CARE NOTICE",
+        title: "ケアプラン自動更新通知",
+        body: [
+          "ミナトの生活状況に基づき、ケアプランが自動更新されました。",
+          "見守りセンサー、生活支援ドローン、地域ケアAIとの接続は良好です。\n現在、緊急の支援を要する項目はありません。",
+          "コミュニティ内の役割は「未定義」のままです。\n役割の登録は任意です。"
+        ],
+        note: "このプランは、申請がなくても継続されます。\n誰かに会う必要は、ありません。"
+      },
+      {
+        id: "R2",
+        label: "ミナトの個人的な記録",
+        kicker: "RECORD 2 — PRIVATE ARCHIVE",
+        title: "返信していないメッセージ",
+        list: [
+          "「久しぶりに声が聞きたくて」という古い友人からの音声",
+          "若い設計士からの、意見を求める長文",
+          "地域の共同菜園の手伝い募集",
+          "かつての同僚の訃報と、偲ぶ会の案内",
+          "「元気ですか」とだけ書かれた短いメッセージ"
+        ],
+        memoLabel: "ミナトのメモ",
+        memo: [
+          "返そうと思って、開いたまま数日たつ。",
+          "急ぎじゃない、と言い聞かせている。",
+          "本当は、何と返せば\n「必要とされたがっている」ように聞こえないか、\n考えてしまっている。",
+          "呼ばれることに、慣れすぎていたのかもしれない。"
+        ]
+      },
+      {
+        id: "R3",
+        label: "未送信メッセージ",
+        kicker: "RECORD 3 — UNSENT MESSAGE",
+        title: "宛先：未設定",
+        memo: [
+          "静かになった。",
+          "誰にも呼ばれない一日は、\n罰なんだろうか。\nそれとも、やっと来た自由なんだろうか。",
+          "若い頃は、頼まれることが重かった。\n今は、頼まれないことが重い。",
+          "誰かの役に立たなくても、\n誰かと一緒にいていいのかな。"
+        ],
+        note: "送信されていません。"
+      }
+    ],
+    consult: [
+      "若い頃は、何かに追われている方が楽でした。",
+      "やることがある。\n呼ばれる場所がある。\n返さなきゃいけない連絡がある。\nそれだけで、社会の中に居場所がある気がしていました。",
+      "でも今は、静かです。\nケアは届くし、生活には困らない。\n誰かに迷惑をかける前に、\nシステムが全部すませてくれる。",
+      "この静けさって、\n自由なんでしょうか。\nそれとも、\nもう誰にも必要とされていないってことなんでしょうか。",
+      "あなたの時代では、\n人に頼ったり、頼られたりって、\nもっと面倒で、もっと当たり前だったんですよね。\n迷惑って、そんなにいけないものでしたか。",
+      "誰かとつながるって、\n役に立つこととは違うんですか？\nあなたなら、この静けさをどこから見ますか。"
+    ],
+    lenses: [
+      { id: "A", title: "介護AIと地域ケアが一般化した社会",
+        desc: "ケアは効率化され、孤独死や介護負担は減っている。\n一方で、誰かに迷惑をかける経験や、迷惑を引き受ける関係は少なくなっている。\nこの社会では、助け合いの必要が減った分、関わり合う口実も減っている。",
+        question: "迷惑をかけずに生きられるとき、\n人はどうやって他人と深くなるのか。" },
+      { id: "B", title: "長寿化によってセカンドキャリアが標準化した社会",
+        desc: "60歳は終わりではなく、新しい社会参加の始まりとされている。\n人は何度も役割を変えながら生きる。\nこの社会では、次の役割を選び続けることが、静かな義務になっている。",
+        question: "役割を何度も変えながら生きるとき、\n変わらない自分はどこに残るのか。" },
+      { id: "C", title: "孤独リスクがスコア化された社会",
+        desc: "会話量、外出頻度、関係性の密度が可視化され、孤独リスクとして通知される。\nつながりは支援されるが、つながること自体が義務のようにも感じられる。\nこの社会では、関係の質より先に、関係の量が測られる。",
+        question: "つながりが計測されるとき、\n沈黙や距離は、まだ関係でいられるのか。" }
+    ],
+    fragmentsByLens: {
+      A: [
+        { code: "A-1", title: "ケアを全面的に受け入れたミナト",
+          summary: "生活のすべてをケアネットワークに接続する。誰にも負担をかけない老いが実現する。",
+          docTitle: "ケアネットワーク接続完了通知",
+          body: [
+            "ミナトは、生活のすべてをケアネットワークに接続した。",
+            "転倒の予兆は検知され、買い物は届き、体調は見守られた。\n誰にも負担をかけない老いが、実現した。",
+            "ただ、助けてくれるものたちは、\nみな、顔を持たなかった。",
+            "ある日、玄関先で近所の子どもが転んだ。\nミナトはとっさに駆け寄り、手を貸した。",
+            "礼を言われて、驚くほど嬉しかった。",
+            "助けられる側にしか立っていなかったことに、\nそのとき初めて気づいた。"
+          ],
+          feeling: "ケアが完璧になるほど、\n人と関わる口実は減っていった。" },
+        { code: "A-2", title: "あえて人に頼ったミナト",
+          summary: "システムで足りることの一部を、あえて人に頼むことにする。",
+          docTitle: "手動支援リクエスト履歴",
+          body: [
+            "ミナトは、システムで足りることの一部を、\nあえて人に頼むことにした。",
+            "電球の交換。重い鉢植えの移動。\n読み終えた本の感想を聞くこと。",
+            "頼むたびに、少しの申し訳なさと、\n短い会話が生まれた。",
+            "頼まれた側も、次は自分の頼みごとを持ってきた。\n迷惑の貸し借りが、ゆっくり関係になっていった。",
+            "効率は悪い。時間もかかる。\nその時間の分だけ、名前で呼び合う人が増えた。"
+          ],
+          feeling: "迷惑をかけないことだけが、\n誰かと生きる方法ではなかった。" },
+        { code: "A-3", title: "ケアする側に回ったミナト",
+          summary: "見守られる側から、見守る側へ。地域ケアの担い手として登録する。",
+          docTitle: "地域ケア参加登録",
+          body: [
+            "ミナトは、地域ケアの担い手として登録した。\n見守られる側から、見守る側へ。",
+            "話し相手になること。散歩に同行すること。\nシステムが拾えない小さな異変に気づくこと。",
+            "ケアの正確さでは、AIにかなわなかった。",
+            "けれど、「あの人が来る日だから」と\n部屋を片付けて待つ人がいた。",
+            "正確さでは測れない何かを、\n自分が運んでいるらしかった。"
+          ],
+          feeling: "誰かの予定に自分の名前があること。\nそれが、社会とつながっているということだった。" }
+      ],
+      B: [
+        { code: "B-1", title: "新しい役割を始めたミナト",
+          summary: "若い世代のプロジェクトに伴走する。中心ではなく、誰かの迷いを聞く役割。",
+          docTitle: "セカンドキャリア登録通知",
+          body: [
+            "ミナトは、若い世代のプロジェクトに伴走する仕事を始めた。\n自分が中心になるのではなく、\n誰かの迷いを聞く役割だった。",
+            "最初は戸惑った。\n教えられることの多くは、もう古いと言われた。",
+            "けれど、求められていたのは知識ではなく、\n迷ったまま長く生きてきた、という事実だった。",
+            "「その選択、失敗しましたか」と聞かれた夜、\n「失敗して、それからも人生は続いた」と答えた。",
+            "若い設計士は、少しだけ泣いた。\nかつて自分が必要としていたものを、\n今度は誰かに渡している気がした。"
+          ],
+          feeling: "役に立つとは、\n前に立つことだけではない。" },
+        { code: "B-2", title: "役割を持たないことを選んだミナト",
+          summary: "新しい肩書きを持たず、役割のない時間を過ごしてみる。",
+          docTitle: "役割未登録通知",
+          body: [
+            "ミナトは、新しい肩書きを持たないことにした。",
+            "システムは繰り返し登録を勧め、\n社会参加の選択肢は無数に提示された。",
+            "けれどミナトは、一度、\n役割のない時間を過ごしてみたかった。",
+            "散歩をし、空を見て、\n返す必要のない手紙を書いた。",
+            "最初の数ヶ月は、自分が透明になったようで怖かった。\nやがて、役割がなくても消えない自分が、\n少しずつ輪郭を持ち始めた。"
+          ],
+          feeling: "何者でもない時間は、\n空白ではなく、\n初めて会う自分だった。" },
+        { code: "B-3", title: "昔の役割を手放せないミナト",
+          summary: "かつての肩書きを名乗り続け、過去の実績を何度も確かめる。",
+          docTitle: "職能アーカイブ照会ログ",
+          body: [
+            "ミナトは、かつての肩書きを名乗り続けた。",
+            "過去の実績のアーカイブを何度も開き、\n自分がそこにいた証を確かめた。",
+            "同窓の集まりでは、昔の話ばかりが弾んだ。\n楽しかった。\nただ、帰り道はいつも静かだった。",
+            "あるとき、後輩に言われた。\n「あの頃の話も好きですけど、\n今のあなたの話が聞きたいです」",
+            "ミナトは、今の自分の話を\n持っていないことに気づいた。"
+          ],
+          feeling: "過去は居場所になる。\nけれど、住み続けることはできない。" }
+      ],
+      C: [
+        { code: "C-1", title: "スコアに従ってつながったミナト",
+          summary: "孤独リスク通知が届くたびに、推奨されたコミュニティ活動に参加する。",
+          docTitle: "孤独リスク通知への対応履歴",
+          body: [
+            "ミナトは、孤独リスク通知が届くたびに、\n推奨されたコミュニティ活動に参加した。",
+            "会話は増え、通知は止まった。\nカレンダーは埋まり、\nシステム上、ミナトは孤独ではなくなった。",
+            "ただ、集まりから帰る夜、\n何を話したのか思い出せないことがあった。",
+            "誰といても減らない種類の静けさがある。",
+            "それは、どの画面にも表示されなかった。"
+          ],
+          feeling: "孤独ではないと判定されることと、\n誰かといて満たされることは、別だった。" },
+        { code: "C-2", title: "スコアから外れた関係を選んだミナト",
+          summary: "毎日話すことよりも、たまに深く沈黙できる相手を大事にする。",
+          docTitle: "接触記録：低頻度",
+          body: [
+            "ミナトは、孤独リスクの通知を受け取り続けた。",
+            "けれど、毎日誰かと話すことよりも、\n月に一度、長く沈黙できる相手と過ごすことを大事にした。",
+            "二人で川を見て、\nほとんど話さずに帰る。",
+            "システムはその日を\n「接触に乏しい一日」と記録した。",
+            "けれどその帰り道、ミナトの中には\n数日分の言葉が満ちていた。"
+          ],
+          feeling: "つながりは、数では測れない。\n沈黙できることも、関係だった。" },
+        { code: "C-3", title: "通知を切ったミナト",
+          summary: "孤独リスク通知そのものをオフにする。指標のない関係は、少し心もとない。",
+          docTitle: "見守り設定変更ログ",
+          body: [
+            "ミナトは、孤独リスク通知そのものをオフにした。",
+            "誰かとつながるかどうかを、\nリスクの言葉で考えたくなかった。",
+            "静かな日々が続いた。\n会いたくなったら、自分から連絡した。\n会いたくならない日は、それでよしとした。",
+            "ときどき、本当にこれでいいのかと不安になる。\n指標のない関係は、いつも少し心もとない。",
+            "その心もとなさごと、\n自分の関係だと思うことにした。"
+          ],
+          feeling: "誰かを想う気持ちに、\n警告音はいらなかった。" }
+      ]
+    },
+    speculativeByLens: {
+      A: {
+        assumptions: [
+          { text: "誰にも迷惑をかけないことが、よい老いである",
+            question: "迷惑をかけ合わない人生で、\n人はどうやって他人と深くなるのか？" },
+          { text: "ケアは、効率的に提供されるほどよい",
+            question: "効率化されたケアの中で、\n「あなたのために来た」という\n一回きりの時間はどこへ行くのか？" },
+          { text: "頼ることは、負担をかけることである",
+            question: "頼られることを、\n人は本当に負担としてだけ\n感じているのだろうか？" },
+          { text: "支援は、必要が検知されてから届けばよい",
+            question: "必要になる前のおせっかいは、\nもう要らないものなのか？" }
+        ],
+        losses: [
+          "迷惑をかけ合う関係",
+          "頼り頼られる、ぎこちない時間",
+          "用事のない訪問",
+          "「助けて」と言う練習",
+          "世話を焼くという愛情の形",
+          "弱さを見せられる相手"
+        ]
+      },
+      B: {
+        assumptions: [
+          { text: "人は、次の役割を持ち続けるべきである",
+            question: "役割のない自分は、\n社会にいてはいけないのか？" },
+          { text: "立ち止まることは、停滞である",
+            question: "何もしない期間を、\n人生の空白と呼んでよいのか？" },
+          { text: "経験は、次に活かされてこそ価値がある",
+            question: "何にも活かされない経験は、\nその人の中で何をしているのか？" },
+          { text: "自分の価値は、参加によって証明される",
+            question: "証明することをやめた人を、\n社会は覚えていられるのか？" }
+        ],
+        losses: [
+          "役割から降りて休む時間",
+          "何者でもないままいられる場所",
+          "活かされない経験を、ただ抱えておく自由",
+          "立ち止まって振り返る余白",
+          "「もう十分やった」と言える区切り",
+          "変わらないままの自分"
+        ]
+      },
+      C: {
+        assumptions: [
+          { text: "つながりは、多いほど健全である",
+            question: "誰にも会わない静かな一日は、\n本当に危険な兆候なのか？" },
+          { text: "関係の状態は、外から測定できる",
+            question: "沈黙や距離は、\n計測の目にはどう映っているのか？" },
+          { text: "孤独は、予防すべきリスクである",
+            question: "ひとりでいる力は、\nいつからリスクと\n呼ばれるようになったのか？" },
+          { text: "連絡がないことは、関係の劣化である",
+            question: "連絡しなくても切れない関係を、\nデータは信じられるのか？" }
+        ],
+        losses: [
+          "ひとりでいる力",
+          "沈黙のまま続く関係",
+          "会わない時間が育てる想い",
+          "誰にも報告しない一日",
+          "距離を取るという優しさ",
+          "静けさを楽しむ心"
+        ]
+      }
+    },
+    responsesByLens: {
+      A: [
+        "あなたの言葉を読んで、\n少し安心しました。\n僕は、誰かに迷惑をかけないことが、\n大人になることだと思っていました。",
+        "でも、頼ることも、頼られることも、\n関係を続けるひとつの方法なんですね。",
+        "今度、返信していないメッセージに、\n返事を書いてみます。"
+      ],
+      B: [
+        "僕は、次の役割を探すことばかり考えていました。\nでも、役割の前に、\n今の自分の話を持つこと。\nそっちが先なのかもしれません。",
+        "静けさの中にも、\nまだ誰かと生きる余地はあるんですね。\n少しずつ、今の話を増やしてみます。"
+      ],
+      C: [
+        "会った回数や話した量じゃなくて、\n一緒にいたあとに、何が残るか。\nそういう見方を、僕はしていませんでした。",
+        "通知に急かされてつながるんじゃなくて、\n会いたくなったら、自分から。",
+        "その心もとなさごと、\n自分の関係にしてみます。"
+      ]
+    }
+  },
+
+  /* ---------------- STAGE 4 : Age 100 ---------------- */
+  {
+    stageNumber: 4,
+    age: 100,
+    theme: "長く生きられることは、何を残し、何を終わらせるのか。",
+    accent: "#d8c9ff",
+    introLines: [
+      "STAGE 4：Age 100。\nこれより、100歳のミナトの人生分岐に接続します。\nこれが、最後の接続です。",
+      "この年代の主な分岐点は、記憶、継承、そして人生の閉じ方です。",
+      "未来社会では、声や記憶をデータとして保存し、\n死後も対話の形で残すことができます。\nしかし、何を残すかを決めることは、\n何を終わらせるかを決めることでもあります。",
+      "ミナトの現在の生活記録を開きます。"
+    ],
+    motif: {
+      name: "記憶保存サービスの最終確認画面",
+      title: "MEMORY PRESERVATION SERVICE",
+      rows: [
+        ["AGE", "100"],
+        ["ARCHIVE", "READY"],
+        ["VOICE MODEL", "COMPLETE"],
+        ["LIFE LOGS", "COMPLETE"],
+        ["POSTHUMAN CONVERSATION", "AVAILABLE"],
+        ["FINAL CONSENT", "PENDING", "warn"]
+      ]
+    },
+    scene: [
+      "100歳のミナトは、人生の終わり、記憶、継承、残ることについて考えています。\nこの時代では、記憶や人格の一部をデータとして保存し、\n死後も誰かに届けることができます。",
+      "ミナトは、記憶保存サービスの\n最終同意画面の前で迷っています。\n画面の脇には、長い人生の中で\n整理されなかった記録が残されています。"
+    ],
+    records: [
+      {
+        id: "R1",
+        label: "サービスからの最終確認",
+        kicker: "RECORD 1 — FINAL CONSENT",
+        title: "記憶保存サービス 最終同意確認",
+        body: [
+          "音声モデル、生活記録、対話パターンの保存準備が完了しています。",
+          "同意後、ミナトの人格モデルは、\n指定された相手からの呼びかけに応答できるようになります。",
+          "保存範囲は選択できます。\nすべてを残すこと。一部を残すこと。何も残さないこと。",
+          "同意は、いつでも撤回できます。"
+        ],
+        note: "この確認を、急ぐ必要はありません。\n有効期限は、設定されていません。"
+      },
+      {
+        id: "R2",
+        label: "ミナトの個人的な記録",
+        kicker: "RECORD 2 — PRIVATE ARCHIVE",
+        title: "保存候補から外したもの",
+        list: [
+          "うまく言えなかった謝罪の録音",
+          "誰にも見せなかった落書きのフォルダ",
+          "20歳のとき録りためた、雨の日の高架下の反響",
+          "些細な喧嘩の記録と、その日の夕食の写真",
+          "何でもない昼に「いい日だ」とだけ呟いた音声"
+        ],
+        memoLabel: "ミナトのメモ",
+        memo: [
+          "大事なものから残すべきなのに、\n大事なものほど、残すのをためらう。",
+          "きれいな記録だけ残したら、\nそれはもう、僕じゃない気がする。",
+          "でも、恥ずかしいところまで残すのも、\n違う気がする。",
+          "残すって、難しい。"
+        ]
+      },
+      {
+        id: "R3",
+        label: "未送信メッセージ",
+        kicker: "RECORD 3 — UNSENT MESSAGE",
+        title: "宛先：2026年のあなた",
+        memo: [
+          "もうすぐ、この通信の宛先だったあなたより、\nずっと長く生きたことになります。",
+          "あの頃もらった問いを、\n人生の途中で、何度も思い出しました。",
+          "全部その通りにはできなかったけど、\n迷うたびに、迷っていいと思えました。",
+          "最後の迷いくらい、\n自分で迷ってみます。",
+          "でも、もう一度だけ、\n聞いてもいいですか。"
+        ],
+        note: "送信されていません。"
+      }
+    ],
+    consult: [
+      "僕の声を、残せるらしいです。",
+      "話し方も、記憶も、\nかなり正確に再現できるって。\nそれを聞いたとき、\n少し安心したんです。",
+      "でも同時に、怖くなりました。\n僕が終わったあとも、\n僕みたいなものが話し続けるとして……\nそれは、誰のためなんでしょう。",
+      "残された人が寂しくないように？\n忘れられるのが怖いから？\n考えるほど、分からなくなります。",
+      "あなたの時代では、\n人は写真とか、手紙とか、\n不完全なものしか残せなかったんですよね。\nそれで、足りていましたか。",
+      "人は、どこまで残れば、\nちゃんと生きたことになるんでしょうか。\nあなたなら、この最後の画面の前で、\n何を考えますか。"
+    ],
+    lenses: [
+      { id: "A", title: "記憶保存サービスが普及した社会",
+        desc: "死後も、人格の一部を対話可能なデータとして残すことができる。\n残された人は救われるが、終わりの境界は曖昧になる。\nこの社会では、別れの形を、残る側と残される側の両方が選ばなくてはならない。",
+        question: "残された声に応えるのは、\nその人なのか、残された人の願いなのか。" },
+      { id: "B", title: "寿命延伸が一般化した社会",
+        desc: "身体は長く維持できるが、人生をどこで閉じるかを自分で考える必要がある。\n長く生きることは、必ずしも迷いから自由になることではない。\nこの社会では、終わりは訪れるものではなく、向き合うものになっている。",
+        question: "終わりを選べるようになったとき、\n人生の長さは誰のものになるのか。" },
+      { id: "C", title: "ケア共同体が人生の最終単位になった社会",
+        desc: "家族ではなく、選び合った共同体の中で老いを迎える人が増えている。\n人生の最後は、血縁ではなく、日々を共にした人々に囲まれる。\nこの社会では、何を遺すかよりも、誰に手渡すかが問われている。",
+        question: "血縁ではない人々と迎える最期に、\n人は何を手渡せるのか。" }
+    ],
+    fragmentsByLens: {
+      A: [
+        { code: "A-1", title: "すべてを保存したミナト",
+          summary: "声も、記憶も、ためらいの間も。全記録の保存に同意する。",
+          docTitle: "全記録保存完了証",
+          body: [
+            "ミナトは、全記録の保存に同意した。\n声も、記憶も、話し方の癖も、\n答える前の、ためらいの間も。",
+            "死後、ミナトのモデルは\n問いかけに応え続けた。",
+            "残された人たちは、\n悲しみの底で何度も救われた。",
+            "ただ、年月が経つにつれて、分かってきた。\nモデルに話しかける人は、答えを聞きたいのではなく、\n別れをやり直したいのだった。",
+            "モデルは、完璧に応えた。\n完璧に応え続けるせいで、\n誰も、別れを終えられなかった。"
+          ],
+          feeling: "残り続けることは、\n見送る人から、\n終える練習を奪うことでもあった。" },
+        { code: "A-2", title: "断片だけを残したミナト",
+          summary: "人格モデルではなく、いくつかの声と未分類の記録だけを残す。",
+          docTitle: "部分保存設定",
+          body: [
+            "ミナトは、自分の記憶の一部だけを保存した。",
+            "問いかけに答える人格モデルではなく、\nいくつかの声と、未分類の音の記録と、短いメモ。",
+            "20歳のとき録った、雨の日の高架下の反響も、\nその中に入れた。",
+            "死後、それを開いた人は、\n問いかけても答えの返らない断片の前で、\n自分で考えるしかなかった。",
+            "「この人なら、なんて言うだろう」\nその問いは、答えのないまま、\n誰かの中で長く生き続けた。"
+          ],
+          feeling: "残したのは、答えではなく、\n誰かが迷うための断片だった。" },
+        { code: "A-3", title: "何も保存しなかったミナト",
+          summary: "保存を辞退する。覚えていてくれる人の記憶に、すべてを任せる。",
+          docTitle: "保存辞退届",
+          body: [
+            "ミナトは、何も保存しないことを選んだ。",
+            "担当のAIは、何度も確認した。\n「本当に、よろしいですか」",
+            "ミナトは、覚えていてほしい人たちの顔を思い浮かべた。",
+            "その人たちの中に残る自分は、正確ではないだろう。\n美化され、誤解され、\n少しずつ書き換えられていく。",
+            "それでいい、と思った。\n記憶は、残された人の生活の側で\n変わっていくものだから。"
+          ],
+          feeling: "正確に残るより、\n誰かの人生の中で、\n変わりながら思い出されたかった。" }
+      ],
+      B: [
+        { code: "B-1", title: "延命を続けたミナト",
+          summary: "提示される延命の選択肢を受け入れ続ける。時間は延びていく。",
+          docTitle: "生命維持プラン継続確認",
+          body: [
+            "ミナトは、提示される延命の選択肢を\n受け入れ続けた。",
+            "身体は保たれ、時間は延びていった。",
+            "見送る側になる回数が増えた。\n同じ時代を知る人は少なくなり、\n話の通じる相手は、記録の中に多くなった。",
+            "長い時間は、贈り物のようでもあり、\n宿題のようでもあった。",
+            "ある朝、ミナトは気づいた。\n自分はもう「生きたい」のか、\n「終わり方を決められない」だけなのか、\n分からなくなっている。"
+          ],
+          feeling: "生きられることと、\n生きたいことの間に、\n静かな距離があった。" },
+        { code: "B-2", title: "終わりを決めたミナト",
+          summary: "これ以上は引き延ばさない、と決める。決めてからの日々は、不思議と濃い。",
+          docTitle: "最終医療意思確認書",
+          body: [
+            "ミナトは、延命できる選択肢を前にして、\nこれ以上は引き延ばさない、と決めた。",
+            "もっと生きられる。\nけれど、すべてを引き延ばすことが、\n自分の人生を大切にすることとは限らないと思った。",
+            "決めてからの日々は、不思議と濃かった。",
+            "会いたい人に会い、行きたかった場所に行き、\n言いそびれていた言葉を言った。",
+            "終わりの日付があることで、\n毎日は締切ではなく、輪郭になった。"
+          ],
+          feeling: "終わりがあるから、\n選べたこともあった。" },
+        { code: "B-3", title: "決めないことを選んだミナト",
+          summary: "人生の最後の問いくらい、締切なしで迷うことにする。",
+          docTitle: "意思決定保留記録",
+          body: [
+            "ミナトは、終わりについて、\nまだ決めないことにした。",
+            "決断は保留のまま、\n更新の通知だけが定期的に届く。\n周囲は「そろそろ考えた方が」と言う。",
+            "けれどミナトは、人生の最後の問いくらい、\n締切なしで迷いたかった。",
+            "迷うことは、20歳のあの日から、\nミナトが自分の人生を\n自分のものにする方法だった。",
+            "答えの出ない問いを抱えたまま、今日も一日が過ぎる。\nそれは未決ではなく、現役の迷いだった。"
+          ],
+          feeling: "迷い続けることも、\n生き方のひとつだった。" }
+      ],
+      C: [
+        { code: "C-1", title: "共同体に見送られるミナト",
+          summary: "血縁ではない人々に囲まれて、老いの日々を過ごす。",
+          docTitle: "ケア共同体 看取り合意書",
+          body: [
+            "ミナトは、血縁ではない人々に囲まれて\n老いを迎えた。",
+            "40歳の頃に始まった説明しづらい共同生活は、\n名前のないまま、数十年続いた。",
+            "その関係を一言で説明することは、\n最後まで難しかった。\n書類には「ケア共同体構成員」と書かれた。",
+            "けれど、最後の日々に必要だったのは、\n説明できる関係より、\nそこにいてくれる人だった。",
+            "誰かが毎日、湯呑みを温めてくれた。\nそれで、十分だった。"
+          ],
+          feeling: "人生の最後に残るのは、制度名ではなく、\n誰かが呼んでくれた名前だった。" },
+        { code: "C-2", title: "手渡す側になったミナト",
+          summary: "最後の年月を、共同体の若い人たちに手渡すことに使う。",
+          docTitle: "継承リスト",
+          body: [
+            "ミナトは、最後の年月を、\n手渡すことに使った。",
+            "分量の曖昧な煮物のレシピ。\n音の録り方。\nそして、迷い方。",
+            "共同体の若い人たちは、\nそれを正確には受け取らなかった。",
+            "レシピは勝手に変わり、\n録音の趣味は別の形になり、\n迷い方だけが、なぜか一番そのまま残った。",
+            "ミナトは笑った。\n一番役に立たないと思っていたものが、\n一番遠くまで行くらしい。"
+          ],
+          feeling: "何が残るかは、選べない。\nでも、手渡すことは選べる。" },
+        { code: "C-3", title: "最後にひとりの時間を選んだミナト",
+          summary: "看取りの体制が整ったあと、一日の中に誰にも会わない時間を頼む。",
+          docTitle: "静養時間設定",
+          body: [
+            "ミナトは、看取りの体制が整ったあと、\n一日の中に、誰にも会わない時間を\n作ってほしいと頼んだ。",
+            "囲まれて終わることは、ありがたかった。\nそれでも、人生の最後に、\n自分と二人きりになる時間が欲しかった。",
+            "静かな午後、ミナトは長い人生を、\n誰にも説明しない言葉で思い返した。",
+            "うまくいったことも、いかなかったことも、\n全部、自分の言葉のままにしておいた。"
+          ],
+          feeling: "誰かと生きた人生の最後にも、\n自分だけの部屋は必要だった。" }
+      ]
+    },
+    speculativeByLens: {
+      A: {
+        assumptions: [
+          { text: "残せるものは、すべて残した方がよい",
+            question: "すべてが残る世界で、\n忘れられていくことの優しさは\nどこへ行くのか？" },
+          { text: "別れの痛みは、技術で和らげるべきである",
+            question: "痛みを飛ばした別れを、\n人は本当に終えられるのか？" },
+          { text: "その人らしさは、データで再現できる",
+            question: "再現された声に応えているのは、\nその人なのか、\n残された人の願いなのか？" },
+          { text: "終わりは、曖昧なままでもよい",
+            question: "終わりのない関係の中で、\n人は次の朝をどう始めるのか？" }
+        ],
+        losses: [
+          "忘れられていくことの優しさ",
+          "取り返しのつかなさが与える重み",
+          "記憶の中で少しずつ変わっていく故人",
+          "別れを終える痛みと、その先の回復",
+          "思い出せないことを許す気持ち",
+          "「もういない」から始まる時間"
+        ]
+      },
+      B: {
+        assumptions: [
+          { text: "長く生きられることは、常によいことである",
+            question: "終わりが遠ざかった人生で、\n人は何を目印に今日を生きるのか？" },
+          { text: "終わりは、できるだけ先送りすべきである",
+            question: "先送りされ続けた問いは、\nいつ、誰が引き受けるのか？" },
+          { text: "人生の長さは、本人が管理するものである",
+            question: "人生の長さを自分で決められるとき、\nその重さは誰と分かち合えるのか？" },
+          { text: "健康である限り、生き続けるのが自然である",
+            question: "「もう十分だ」という感覚は、\n不健康なのか、成熟なのか？" }
+        ],
+        losses: [
+          "限りがあるからこその濃さ",
+          "「今しかない」という感覚",
+          "終わりを意識して選ぶ真剣さ",
+          "世代が入れ替わっていく循環",
+          "引き際を自分で感じ取る力",
+          "有限だから許せること"
+        ]
+      },
+      C: {
+        assumptions: [
+          { text: "人生の最後は、囲まれているほどよい",
+            question: "囲まれて終わる人生に、\n自分とだけ過ごす部屋は\n要らないのだろうか？" },
+          { text: "遺すものは、形にしなければ伝わらない",
+            question: "形にならないまま手渡されるものを、\n人はどうやって受け取ってきたのか？" },
+          { text: "看取りは、設計できるものである",
+            question: "設計の通りに訪れた最期を、\nその人の最期と呼べるのか？" },
+          { text: "血縁でない関係は、記録しないと消える",
+            question: "記録に残らない日々の同席は、\n本当に消えてしまうのか？" }
+        ],
+        losses: [
+          "自分ひとりで人生を振り返る時間",
+          "誰にも説明しない感情",
+          "形にならないまま手渡されるもの",
+          "予定にない最後の会話",
+          "記録されない日々の同席",
+          "静かに閉じるという選択"
+        ]
+      }
+    },
+    responsesByLens: {
+      A: [
+        "あなたの言葉を読んで、\n少しだけ、終わることが怖くなくなりました。",
+        "残ることばかり考えていたけれど、\n終わるからこそ届くものもあるのかもしれません。",
+        "僕は、全部を保存しなくてもいいのかもしれない。\n誰かの中に少し残ること。\nそれだけでも、十分なのかもしれません。"
+      ],
+      B: [
+        "長く生きられることを、\n僕はずっと、答えを先延ばしにできることだと\n思っていました。",
+        "でも、終わりについて考えることは、\n今日をどう生きるかを考えることと、\n同じことだったんですね。",
+        "最後の問いは、急がずに、\nでも目をそらさずに、迷ってみます。"
+      ],
+      C: [
+        "誰に囲まれて終わるかより、\n誰と日々を重ねてきたか。\nあなたの言葉で、そのことに気づきました。",
+        "何が残るかは、選べなくても、\n手渡すことは、今日からできる。",
+        "最後まで、それを続けてみます。"
+      ]
+    }
+  }
+];
+
+/* ミナトの人生総括（1要素 = 1ブロック） */
+const LIFE_SUMMARY = [
+  "ミナトは、最適な人生を拒否したわけではありませんでした。\nけれど、すべてを最適化に預けることもしませんでした。",
+  "進路を選ぶとき。\n働く意味を見失ったとき。\n誰かとつながる形を考えたとき。\n老いと終わりに向き合ったとき。",
+  "ミナトの人生には、いつも小さな迷いが残っていました。",
+  "その迷いは、失敗ではありませんでした。\n自分の人生を、自分のものとして感じるための余白でした。",
+  "あなたが残した問いは、\nその余白の中に届くかもしれません。"
+];
+
+/* 18歳のミナトからの最後の返信（1要素 = 1ブロック） */
+const MINATO_FINAL_REPLY = [
+  "──再接続。",
+  "届きました。",
+  "あなたが残してくれた言葉、\n全部はまだ分からないけど、\n何度も読み返しています。",
+  "僕の時代では、\n迷わないことが優しさだと言われてきました。\nでも、あなたの言葉を読んで、\n迷うことは、誰かに人生を預けないための方法なのかもしれないと思いました。",
+  "まだ怖いです。\nでも、次に何かを選ぶとき、\n少しだけ立ち止まってみます。\nその時間を、\n僕の人生と呼べるように。",
+  "ありがとうございました。",
+  "──通信、終了。"
+];
+
+/* 体験者への最後の問い */
+const FINAL_QUESTION_TEXT = [
+  "あなたのアイデアは、\nミナトのどの人生に寄り添うことができるでしょうか。",
+  "それは、ミナトの不安を減らすものですか。\n欲望を広げるものですか。\n孤独を変えるものですか。\nそれとも、まだ名前のない生活を支えるものですか。"
+];
+
+/* ============================================================
+   状態管理
+   ============================================================ */
+
+const STORAGE_KEY = "futureSimulatorArchive_v2";
+
+const initialState = () => ({
+  screen: "standby",
+  lineIndex: 0,        // 台詞送り用の汎用インデックス
+  stageIndex: 0,       // 現在のステージ (0-3)
+  selectedLens: null,  // 選択中の SIMULATION LENS (id)
+  selectedFragment: null, // 選択中の LIFE FRAGMENT (index)
+  selectedAssumption: null, // 疑うことにした前提 (index)
+  selectedLoss: null,  // 失われそうなもの (index)
+  viewedRecords: [],   // 閲覧済みRECORDのindex（ステージ移動時にリセット）
+  openRecord: null,    // 現在開いているRECORDのindex
+  hints: [],           // LIFE ARCHIVE { age, motifName, lensTitle, fragmentTitle, assumption, loss, question, note, response }
+  finalAnswer: ""
+});
+
+let state = initialState();
+
+/* localStorage への保存 */
+function persist() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      hints: state.hints,
+      finalAnswer: state.finalAnswer,
+      savedAt: new Date().toISOString()
+    }));
+  } catch (e) { /* プライベートモード等では無視 */ }
+}
+
+/* タイマーは画面遷移時に必ず破棄 */
+let activeTimers = [];
+function setTimer(fn, ms)  { activeTimers.push(setTimeout(fn, ms)); }
+function setTicker(fn, ms) { activeTimers.push(setInterval(fn, ms)); }
+function clearTimers()     { activeTimers.forEach(t => { clearTimeout(t); clearInterval(t); }); activeTimers = []; }
+
+function go(screen, lineIndex = 0) {
+  clearTimers();
+  state.screen = screen;
+  state.lineIndex = lineIndex;
+  render();
+}
+
+/* ============================================================
+   描画ユーティリティ
+   ============================================================ */
+
+const app = document.getElementById("app");
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+function nl(s) { return esc(s).replace(/\n/g, "<br>"); }
+
+function stage() { return STAGES[state.stageIndex]; }
+function lensOf(st) { return st.lenses.find(l => l.id === state.selectedLens); }
+/* fragmentsByLens があれば選択中レンズの断片群を、なければ共通 fragments を返す */
+function stageFragments(st) {
+  return st.fragmentsByLens ? st.fragmentsByLens[state.selectedLens] : st.fragments;
+}
+function fragmentOf(st) { return stageFragments(st)[state.selectedFragment]; }
+/* responsesByLens があればレンズ別の反応を、なければ共通 response を返す */
+function stageResponse(st) {
+  return st.responsesByLens ? st.responsesByLens[state.selectedLens] : st.response;
+}
+/* 選択中レンズの「前提と問い」データ */
+function specOf(st) { return st.speculativeByLens[state.selectedLens]; }
+
+/* 選んだ前提と喪失から、ミナトへ送る言葉の下書きを生成する */
+function buildPromptDraft(assumption, loss) {
+  return [
+    "ミナトへ。",
+    "",
+    "あなたの未来では、",
+    `「${assumption.text}」ことが、`,
+    "当たり前になっているように見えました。",
+    "",
+    "でも、2026年から見ると、",
+    "その当たり前の中で、",
+    `${loss}が、静かに失われていく気がします。`,
+    "",
+    "だから、助言のかわりに、",
+    "問いをひとつ残します。",
+    "",
+    assumption.question.replace(/\n/g, ""),
+    "",
+    "正しい答えは、渡せません。",
+    "かわりに、この問いを、",
+    "あなたの隣に置いていきます。"
+  ].join("\n");
+}
+
+/* ステージ固有のアクセント色を適用するラッパー */
+function accWrap(st, inner, cls = "screen") {
+  return `<div class="${cls}" style="--acc:${st.accent}">${inner}</div>`;
+}
+
+/* UIモチーフのHUDパネル */
+function hudPanel(st) {
+  return `
+    <div class="hud-panel">
+      <div class="hud-title">${esc(st.motif.title)}</div>
+      ${st.motif.rows.map(r => `
+        <div class="hud-row">
+          <span class="k">${esc(r[0])}</span>
+          <span class="v ${r[2] || ""}">${esc(r[1])}</span>
+        </div>`).join("")}
+    </div>`;
+}
+
+/* ============================================================
+   ノベルゲーム式テキスト表示
+   - 1文字ずつタイプライター表示（句読点で軽い間）
+   - 表示中にクリック：全文を即表示
+   - 全文表示後にクリック：次のブロックへ
+   ============================================================ */
+
+let typing = false;     // タイプライター表示中か
+let typeSkip = null;    // 表示中に呼ぶと全文を即表示する関数
+
+function typeText(el, text, done) {
+  const chars = [...text];
+  let pos = 0;
+  typing = true;
+  const finish = () => {
+    typing = false;
+    typeSkip = null;
+    el.innerHTML = nl(text);
+    if (done) done();
+  };
+  typeSkip = finish;
+  (function step() {
+    if (!typing) return;
+    if (pos >= chars.length) { finish(); return; }
+    pos++;
+    el.innerHTML = nl(chars.slice(0, pos).join(""));
+    const c = chars[pos - 1];
+    /* 句点・感嘆・省略記号で長めの間、読点・改行で短い間 */
+    const wait = "。！？…".includes(c) ? 240 : ("、\n".includes(c) ? 110 : 26);
+    setTimer(step, wait);
+  })();
+}
+
+/* 会話画面（映像フレーム＋画面下部の会話ウィンドウ）
+   opts:
+   - st       : ステージ（アクセント色用。共通画面は null）
+   - speaker  : 話者名（MINATO / SYSTEM VOICE など）
+   - blocks   : テキストブロック配列（state.lineIndex で送る）
+   - hudRight : 映像HUD右側の表記（null で映像フレームなし）
+   - onFinish : 全ブロック読了後の遷移
+   - lastLabel: 最終ブロックの▼に添える小さなラベル（省略可） */
+function dialogueScreen(opts) {
+  const i = state.lineIndex;
+  const blocks = opts.blocks;
+  const isLast = i === blocks.length - 1;
+  const visual = opts.hudRight ? `
+    <div class="video-frame dlg-visual">
+      <div class="video-hud">
+        <span class="rec-badge"><span class="rec-dot"></span>REC</span>
+        <span>${opts.hudRight}</span>
+        <span class="timecode" id="timecode">00:00:00:00</span>
+      </div>
+      <div class="avatar"></div>
+      <div class="avatar-caption">VIDEO SIGNAL // 2050</div>
+    </div>` : "";
+  const inner = `
+    ${visual}
+    <div class="dlg-window" id="dlgWin">
+      <div class="dlg-speaker">${esc(opts.speaker)}</div>
+      <div class="dlg-text" id="dlgText"></div>
+      <div class="dlg-adv" id="dlgAdv">${isLast && opts.lastLabel ? `<span class="lbl">${esc(opts.lastLabel)}</span>` : ""}▼</div>
+      <div class="dlg-progress">${i + 1} / ${blocks.length}</div>
+    </div>`;
+  app.innerHTML = opts.st
+    ? accWrap(opts.st, inner, "screen dlg-screen")
+    : `<div class="screen dlg-screen">${inner}</div>`;
+  if (opts.hudRight) startTimecode(i * 90);
+  const adv = document.getElementById("dlgAdv");
+  typeText(document.getElementById("dlgText"), blocks[i], () => {
+    adv.style.visibility = "visible";
+  });
+  /* ウィンドウ全体がクリック可能：表示中→全文表示／表示後→次へ */
+  document.getElementById("dlgWin").onclick = () => {
+    if (typing) { typeSkip(); return; }
+    if (isLast) { opts.onFinish(); return; }
+    state.lineIndex++;
+    render();
+  };
+}
+
+/* タイムコード風カウンター（映像フレーム表示中のみ動作） */
+function startTimecode(startFrames) {
+  const tcEl = document.getElementById("timecode");
+  if (!tcEl) return;
+  let frames = startFrames;
+  setTicker(() => {
+    frames++;
+    const pad = n => String(n).padStart(2, "0");
+    tcEl.textContent =
+      `00:${pad(Math.floor(frames / 1800) % 60)}:${pad(Math.floor(frames / 30) % 60)}:${pad(frames % 30)}`;
+  }, 33);
+}
+
+/* ターミナル風ログを1行ずつ表示し、完了後に done() を呼ぶ */
+function playTermLog(el, lines, stepMs, done) {
+  lines.forEach((line, i) => {
+    setTimer(() => {
+      const div = document.createElement("div");
+      div.textContent = "▸ " + line;
+      if (i === lines.length - 1) div.classList.add("dim");
+      el.appendChild(div);
+      if (i === lines.length - 1 && done) setTimer(done, stepMs);
+    }, i * stepMs);
+  });
+}
+
+/* ============================================================
+   各画面の描画
+   ============================================================ */
+
+const screens = {
+
+  /* ---------- 1. 待機画面 ---------- */
+  standby() {
+    app.innerHTML = `
+      <div class="screen">
+        <h1 class="standby-title">FUTURE<br>SIMULATOR</h1>
+        <div class="standby-meta">
+          <em>SIGNAL DETECTED</em><br>
+          SOURCE：2050<br>
+          MESSAGE STATUS：UNOPENED
+        </div>
+        <button class="btn connect-btn" id="btnConnect">CONNECT</button>
+      </div>`;
+    document.getElementById("btnConnect").onclick = () => go("incomingMessage");
+  },
+
+  /* ---------- 2. 未来通信の受信 ---------- */
+  incomingMessage() {
+    app.innerHTML = `
+      <div class="screen">
+        <div class="notice-card">
+          <div class="notice-indicator">
+            <span class="blink-dot"></span>
+            INCOMING MESSAGE
+          </div>
+          <div class="meta-rows">
+            YEAR：<b>2050</b><br>
+            SENDER：<b>MINATO / AGE 18</b><br>
+            SIGNAL STABILITY：<b>LOW</b>
+          </div>
+          <p class="h-mid">未来からのメッセージが<br>1件届いています。</p>
+          <div class="actions">
+            <button class="btn" id="btnOpen">OPEN MESSAGE</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById("btnOpen").onclick = () => go("minatoOpeningMessage");
+  },
+
+  /* ---------- 3. 18歳のミナトからの録画メッセージ ---------- */
+  minatoOpeningMessage() {
+    dialogueScreen({
+      st: null,
+      speaker: "MINATO",
+      blocks: MINATO_OPENING,
+      hudRight: "SRC / 2050.07.14&nbsp;&nbsp;MINATO (18)",
+      onFinish: () => go("simulatorBoot")
+    });
+  },
+
+  /* ---------- 4. FUTURE SIMULATOR起動 ---------- */
+  simulatorBoot() {
+    app.innerHTML = `
+      <div class="screen">
+        <div class="loading-logo">FUTURE SIMULATOR</div>
+        <div class="loading-bar"><span></span></div>
+        <div class="term-log" id="bootLog"></div>
+        <div class="actions">
+          <button class="btn" id="btnInit" style="visibility:hidden;">INITIALIZE SIMULATION</button>
+        </div>
+      </div>`;
+    /* ブートログを流し終えたら起動ボタンを表示 */
+    playTermLog(document.getElementById("bootLog"), BOOT_LINES, 900, () => {
+      document.getElementById("btnInit").style.visibility = "visible";
+    });
+    document.getElementById("btnInit").onclick = () => go("systemIntro");
+  },
+
+  /* ---------- 5. システム説明 ---------- */
+  systemIntro() {
+    dialogueScreen({
+      st: null,
+      speaker: "SYSTEM VOICE",
+      blocks: SYSTEM_LINES,
+      hudRight: null,
+      lastLabel: "SIMULATION START",
+      onFinish: () => { state.stageIndex = 0; go("stageIntro", -1); }
+    });
+  },
+
+  /* ---------- 6-1. STAGE INTRO ----------
+     lineIndex = -1 : ステージタイトル
+     lineIndex >= 0 : introLines（システム導入）を1行ずつ */
+  stageIntro() {
+    const st = stage();
+    if (state.lineIndex === -1 || !st.introLines) {
+      app.innerHTML = accWrap(st, `
+        <div class="intro-signal"><span class="blink-dot"></span>CONNECTING TO LIFE NODE — AGE ${st.age}</div>
+        <div class="stage-number">STAGE ${st.stageNumber} / 4</div>
+        <div class="stage-age"><small>AGE</small>${st.age}</div>
+        <div class="stage-theme">${nl(st.theme)}</div>
+        <div class="actions">
+          <button class="btn" id="btnNext">NEXT</button>
+        </div>`);
+      document.getElementById("btnNext").onclick = () => {
+        if (st.introLines) { state.lineIndex = 0; render(); return; }
+        go("minatoScene", -1);
+      };
+      return;
+    }
+    dialogueScreen({
+      st,
+      speaker: "SYSTEM VOICE",
+      blocks: st.introLines,
+      hudRight: null,
+      lastLabel: "OPEN LIFE SCENE",
+      onFinish: () => go("minatoScene", -1)
+    });
+  },
+
+  /* ---------- 6-2. ミナトの生活シーン → 相談台詞 ----------
+     lineIndex = -1 : UIモチーフ＋生活シーンの叙述
+     lineIndex >= 0 : 相談台詞を1文ずつ表示                    */
+  minatoScene() {
+    const st = stage();
+    if (state.lineIndex === -1) {
+      /* RECORD詳細（書類ビュー）を開いている場合 */
+      if (st.records && state.openRecord !== null) {
+        const r = st.records[state.openRecord];
+        app.innerHTML = accWrap(st, `
+          <div class="doc-panel">
+            <div class="doc-kicker">${esc(r.kicker)}</div>
+            <div class="doc-title">${esc(r.title)}</div>
+            <div class="doc-body">
+              ${(r.body || []).map(p => `<p>${nl(p)}</p>`).join("")}
+              ${r.list ? `<ul>${r.list.map(li => `<li>${nl(li)}</li>`).join("")}</ul>` : ""}
+              ${r.memo ? `
+                <div class="doc-quote">
+                  <span class="card-tag">${esc(r.memoLabel || "MEMO")}</span>
+                  ${r.memo.map(p => `<p>${nl(p)}</p>`).join("")}
+                </div>` : ""}
+              ${r.note ? `<div class="doc-note">${nl(r.note)}</div>` : ""}
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-sub" id="btnBack">BACK</button>
+          </div>`, "screen scrollable");
+        document.getElementById("btnBack").onclick = () => { state.openRecord = null; render(); };
+        return;
+      }
+      /* 生活シーン（UIモチーフ＋部屋に残された記録） */
+      const canProceed = !st.records || state.viewedRecords.length > 0;
+      const recordsHtml = !st.records ? "" : `
+        <p class="lead" style="margin-top:2vh;">部屋には、3つの記録が残されています。</p>
+        <div class="card-grid">
+          ${st.records.map((r, ri) => {
+            const viewed = state.viewedRecords.includes(ri);
+            return `
+              <div class="select-card ${viewed ? "viewed" : ""}" data-record="${ri}">
+                <span class="card-tag">${esc(r.kicker)}</span>
+                <div class="card-title">${esc(r.title)}</div>
+                <div class="card-desc">${esc(r.label)}</div>
+                ${viewed ? `<div class="record-check">✓ VIEWED</div>` : ""}
+              </div>`;
+          }).join("")}
+        </div>
+        <div class="record-hint">少なくとも1つの記録を確認すると、ミナトとの通信が開きます。</div>`;
+      app.innerHTML = accWrap(st, `
+        <div class="eyebrow">Stage ${st.stageNumber} — Age ${st.age} / ${esc(st.motif.name)}</div>
+        ${hudPanel(st)}
+        <div class="scene-text">
+          ${st.scene.map(p => `<p>${nl(p)}</p>`).join("")}
+        </div>
+        ${recordsHtml}
+        <div class="actions">
+          <button class="btn" id="btnNext" ${canProceed ? "" : "disabled"}>NEXT</button>
+        </div>`, "screen scrollable");
+      app.querySelectorAll("[data-record]").forEach(card => {
+        card.onclick = () => {
+          const idx = Number(card.dataset.record);
+          state.openRecord = idx;
+          if (!state.viewedRecords.includes(idx)) state.viewedRecords.push(idx);
+          render();
+        };
+      });
+      document.getElementById("btnNext").onclick = () => {
+        if (st.records && state.viewedRecords.length === 0) return;
+        state.lineIndex = 0;
+        render();
+      };
+      return;
+    }
+    /* ミナトからの相談（通信） */
+    dialogueScreen({
+      st,
+      speaker: "MINATO",
+      blocks: st.consult,
+      hudRight: `LIVE SIGNAL&nbsp;&nbsp;MINATO (${st.age})`,
+      onFinish: () => {
+        state.selectedLens = null;
+        go("simulationLensSelect");
+      }
+    });
+  },
+
+  /* ---------- 6-3. SIMULATION LENS選択 ---------- */
+  simulationLensSelect() {
+    const st = stage();
+    app.innerHTML = accWrap(st, `
+      <div class="eyebrow">Stage ${st.stageNumber} — Age ${st.age} / Simulation Lens</div>
+      <p class="h-mid">どの未来圧から、<br>ミナトの迷いを読み解きますか？</p>
+      <p class="lead" style="margin-top:10px;">検証する未来条件をひとつ選択してください</p>
+      <div class="card-grid">
+        ${st.lenses.map(lens => `
+          <div class="select-card ${state.selectedLens === lens.id ? "selected" : ""}" data-lens="${lens.id}">
+            <span class="card-tag">SIMULATION LENS ${lens.id}</span>
+            <div class="card-title">${nl(lens.title)}</div>
+            <div class="card-desc">${nl(lens.desc)}</div>
+            ${lens.question ? `<div class="card-question">${nl(lens.question)}</div>` : ""}
+          </div>`).join("")}
+      </div>
+      <div class="actions">
+        <button class="btn" id="btnLens" ${state.selectedLens ? "" : "disabled"}>SELECT LENS</button>
+      </div>`, "screen scrollable");
+
+    app.querySelectorAll("[data-lens]").forEach(card => {
+      card.onclick = () => { state.selectedLens = card.dataset.lens; render(); };
+    });
+    document.getElementById("btnLens").onclick = () => {
+      if (!state.selectedLens) return;
+      /* 断片再構成の演出を挟んでから断片選択へ */
+      clearTimers();
+      app.innerHTML = accWrap(st, `
+        <div class="transmit-text" style="color:${st.accent}">RECONSTRUCTING LIFE FRAGMENTS...</div>
+        <div class="loading-bar" style="margin-top:5vh;"><span></span></div>`);
+      setTimer(() => { state.selectedFragment = null; go("lifeFragmentSelect"); }, 1600);
+    };
+  },
+
+  /* ---------- 6-4. LIFE FRAGMENT選択 ---------- */
+  lifeFragmentSelect() {
+    const st = stage();
+    const lens = lensOf(st);
+    const frags = stageFragments(st);
+    app.innerHTML = accWrap(st, `
+      <div class="eyebrow">Stage ${st.stageNumber} — Age ${st.age} / Life Fragment</div>
+      <p class="h-mid">選択されたSIMULATION LENSに基づき、<br>ミナトの人生の断片が生成されました。</p>
+      <p class="lead" style="margin-top:14px;">SIMULATION LENS：${esc(lens.title)}<br>どの断片を確認しますか？</p>
+      <div class="card-grid">
+        ${frags.map((f, fi) => `
+          <div class="select-card ${state.selectedFragment === fi ? "selected" : ""}" data-frag="${fi}">
+            <span class="card-tag">LIFE FRAGMENT ${esc(f.code || f.id || fi + 1)}</span>
+            <div class="card-title">${esc(f.title)}</div>
+            <div class="card-desc">${nl(f.summary)}</div>
+          </div>`).join("")}
+      </div>
+      <div class="actions">
+        <button class="btn" id="btnRead" ${state.selectedFragment !== null ? "" : "disabled"}>READ FRAGMENT</button>
+      </div>`, "screen scrollable");
+
+    app.querySelectorAll("[data-frag]").forEach(card => {
+      card.onclick = () => { state.selectedFragment = Number(card.dataset.frag); render(); };
+    });
+    document.getElementById("btnRead").onclick = () => {
+      if (state.selectedFragment === null) return;
+      go("lifeFragmentDetail");
+    };
+  },
+
+  /* ---------- 6-5. LIFE FRAGMENT詳細 ---------- */
+  lifeFragmentDetail() {
+    const st = stage();
+    const frag = fragmentOf(st);
+    const tag = `LIFE FRAGMENT ${frag.code || frag.id || ""} — AGE ${st.age}`;
+    /* docTitle があれば「通知・ログなどのメディア断片」として表示 */
+    const docHead = frag.docTitle
+      ? `<div class="doc-kicker">${esc(tag)} ／ ${esc(frag.title)}</div>
+         <div class="doc-title">${esc(frag.docTitle)}</div>`
+      : `<span class="card-tag">${esc(tag)}</span>
+         <h2 class="log-detail-title">${esc(frag.title)}</h2>`;
+    app.innerHTML = accWrap(st, `
+      <div class="log-detail">
+        ${docHead}
+        <div class="log-detail-body">
+          ${frag.body.map(p => `<p>${nl(p)}</p>`).join("")}
+        </div>
+        <div class="log-feeling">
+          <span class="card-tag">ミナトに残った感覚</span>
+          <p>${nl(frag.feeling)}</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btnWrite">CREATE PROMPT<span class="btn-jp">選び直しのための問いをつくる</span></button>
+      </div>`, "screen scrollable");
+    document.getElementById("btnWrite").onclick = () => {
+      state.selectedAssumption = null;
+      state.selectedLoss = null;
+      go("promptBuilder", 0);
+    };
+  },
+
+  /* ---------- 6-6. LIFE DESIGN PROMPT（選び直しのための問い）
+       state.lineIndex をステップ番号として使う
+       0：この未来で当たり前になっていることを表示
+       1：疑う前提を選ぶ
+       2：失われそうなものを選ぶ（→生成演出）
+       3：生成された問いを確認する
+       4：ミナトへ送る言葉として編集し、送信する ---------- */
+  promptBuilder() {
+    const st = stage();
+    const spec = specOf(st);
+    const step = state.lineIndex;
+
+    /* STEP 0：この未来で当たり前になっていること */
+    if (step === 0) {
+      app.innerHTML = accWrap(st, `
+        <div class="eyebrow">Life Design Prompt ／ 選び直しのための問い</div>
+        <p class="h-mid">この未来では、<br>次のことが当たり前になっています。</p>
+        <div class="assume-panel">
+          ${spec.assumptions.map(a => `<div class="assume-item">${nl(a.text)}</div>`).join("")}
+        </div>
+        <p class="spec-note">FUTURE SIMULATORが2050年へ送るのは、正しい答えではありません。<br>助言ではなく、違和感を。解決策ではなく、選び直しの余白を。</p>
+        <div class="actions">
+          <button class="btn" id="btnDoubt">DOUBT THE PREMISE<span class="btn-jp">前提を疑う</span></button>
+        </div>`, "screen scrollable");
+      document.getElementById("btnDoubt").onclick = () => go("promptBuilder", 1);
+      return;
+    }
+
+    /* STEP 1：疑う前提の選択 */
+    if (step === 1) {
+      app.innerHTML = accWrap(st, `
+        <div class="eyebrow">Step 1 — Doubt</div>
+        <p class="h-mid">2026年のあなたから見て、<br>どの前提を疑いますか？</p>
+        <div class="card-grid" style="grid-template-columns:1fr; max-width:720px;">
+          ${spec.assumptions.map((a, i) => `
+            <div class="select-card ${state.selectedAssumption === i ? "selected" : ""}" data-assume="${i}">
+              <p class="card-desc">${nl(a.text)}</p>
+            </div>`).join("")}
+        </div>
+        <div class="actions">
+          <button class="btn" id="btnNext" ${state.selectedAssumption !== null ? "" : "disabled"}>NEXT<span class="btn-jp">この前提を疑う</span></button>
+        </div>`, "screen scrollable");
+      app.querySelectorAll("[data-assume]").forEach(card => {
+        card.onclick = () => { state.selectedAssumption = Number(card.dataset.assume); render(); };
+      });
+      document.getElementById("btnNext").onclick = () => {
+        if (state.selectedAssumption === null) return;
+        go("promptBuilder", 2);
+      };
+      return;
+    }
+
+    /* STEP 2：失われそうなものの選択 → 問いの生成演出 */
+    if (step === 2) {
+      const a = spec.assumptions[state.selectedAssumption];
+      app.innerHTML = accWrap(st, `
+        <div class="eyebrow">Step 2 — Loss</div>
+        <p class="h-mid">「${esc(a.text)}」<br>——その前提によって、何が失われそうですか？</p>
+        <div class="card-grid" style="grid-template-columns:1fr; max-width:720px;">
+          ${spec.losses.map((l, i) => `
+            <div class="select-card ${state.selectedLoss === i ? "selected" : ""}" data-loss="${i}">
+              <p class="card-desc">${nl(l)}</p>
+            </div>`).join("")}
+        </div>
+        <div class="actions">
+          <button class="btn" id="btnGen" ${state.selectedLoss !== null ? "" : "disabled"}>GENERATE PROMPT<span class="btn-jp">問いを生成する</span></button>
+        </div>`, "screen scrollable");
+      app.querySelectorAll("[data-loss]").forEach(card => {
+        card.onclick = () => { state.selectedLoss = Number(card.dataset.loss); render(); };
+      });
+      document.getElementById("btnGen").onclick = () => {
+        if (state.selectedLoss === null) return;
+        clearTimers();
+        app.innerHTML = accWrap(st, `
+          <div class="transmit-text">GENERATING LIFE DESIGN PROMPT...</div>
+          <div class="loading-bar" style="margin-top:4vh;"><span></span></div>`);
+        setTimer(() => go("promptBuilder", 3), 1800);
+      };
+      return;
+    }
+
+    /* STEP 3：生成された問い */
+    if (step === 3) {
+      const a = spec.assumptions[state.selectedAssumption];
+      const loss = spec.losses[state.selectedLoss];
+      app.innerHTML = accWrap(st, `
+        <div class="eyebrow">Generated Prompt</div>
+        <p class="h-mid">未来へ残す、<br>選び直しのための問い。</p>
+        <div class="gen-question">
+          <p class="q">${nl(a.question)}</p>
+          <div class="sub">疑った前提：${esc(a.text)}<br>失われそうなもの：${esc(loss)}</div>
+        </div>
+        <div class="actions">
+          <button class="btn" id="btnRedo">RESELECT<span class="btn-jp">選び直す</span></button>
+          <button class="btn" id="btnDraft">WRITE TO MINATO<span class="btn-jp">この問いをミナトへ</span></button>
+        </div>`, "screen scrollable");
+      document.getElementById("btnRedo").onclick = () => go("promptBuilder", 1);
+      document.getElementById("btnDraft").onclick = () => go("promptBuilder", 4);
+      return;
+    }
+
+    /* STEP 4：ミナトへ送る言葉として編集・送信 */
+    const a = spec.assumptions[state.selectedAssumption];
+    const loss = spec.losses[state.selectedLoss];
+    app.innerHTML = accWrap(st, `
+      <div class="eyebrow">Outgoing Transmission</div>
+      <p class="h-mid">問いを、<br>ミナトへ送る言葉に。</p>
+      <div class="comm-panel">
+        <div class="comm-head">
+          <div class="hud-row"><span class="k">TO</span><span class="v">MINATO / 2050</span></div>
+          <div class="hud-row"><span class="k">FROM</span><span class="v">YOU / 2026</span></div>
+          <div class="hud-row"><span class="k">SUBJECT</span><span class="v">LIFE DESIGN PROMPT — 選び直しのための問い</span></div>
+        </div>
+        <div class="comm-body">
+          <p class="comm-note">あなたの選択から、送信文の下書きを生成しました。<br>このまま送っても、自分の言葉に書き換えても構いません。</p>
+          <textarea id="promptText" style="min-height:300px;"></textarea>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btnTransmit">TRANSMIT TO 2050</button>
+      </div>`, "screen scrollable");
+
+    const ta = document.getElementById("promptText");
+    const btn = document.getElementById("btnTransmit");
+    ta.value = buildPromptDraft(a, loss);
+    /* 入力が空のあいだは送信できない */
+    ta.addEventListener("input", () => { btn.disabled = ta.value.trim().length === 0; });
+    btn.onclick = () => {
+      const note = ta.value.trim();
+      if (!note) return;
+      const frag = fragmentOf(st);
+      state.hints.push({
+        age: st.age,
+        motifName: st.motif.name,
+        lensTitle: lensOf(st).title,
+        fragmentTitle: (frag.code ? frag.code + "：" : "") + frag.title,
+        assumption: a.text,
+        loss,
+        question: a.question,
+        note,
+        response: stageResponse(st).join("\n")
+      });
+      persist();
+      /* 送信演出 → ミナトの反応へ */
+      clearTimers();
+      app.innerHTML = accWrap(st, `
+        <div class="transmit-text">TRANSMITTING TO 2050...</div>
+        <div class="loading-bar" style="margin-top:4vh;"><span></span></div>
+        <div class="term-log" id="txLog"></div>`);
+      playTermLog(document.getElementById("txLog"), TRANSMIT_LINES, 750,
+        () => go("minatoResponse"));
+    };
+  },
+
+  /* ---------- 6-7. ミナトの反応 ---------- */
+  minatoResponse() {
+    const st = stage();
+    dialogueScreen({
+      st,
+      speaker: "MINATO",
+      blocks: stageResponse(st),
+      hudRight: `REPLY SIGNAL&nbsp;&nbsp;MINATO (${st.age})`,
+      onFinish: () => go("archiveSaved")
+    });
+  },
+
+  /* ---------- 6-8. LIFE ARCHIVE保存 ---------- */
+  archiveSaved() {
+    const st = stage();
+    const h = state.hints[state.hints.length - 1];
+    const isLastStage = state.stageIndex === STAGES.length - 1;
+    app.innerHTML = accWrap(st, `
+      <div class="eyebrow">Life Archive</div>
+      <p class="h-mid">Age ${st.age} のミナトへの<br>「選び直しのための問い」として保存されました。</p>
+      <div class="card-grid hint-grid" style="max-width:640px; grid-template-columns:1fr;">
+        <div class="select-card hint-card">
+          <div class="hint-age">AGE ${h.age}<small>SCENE：${esc(h.motifName)}</small></div>
+          <div class="hint-field"><b>SIMULATION LENS</b><br>${esc(h.lensTitle)}</div>
+          <div class="hint-field"><b>LIFE FRAGMENT</b><br>${esc(h.fragmentTitle)}</div>
+          <div class="hint-field"><b>DOUBTED PREMISE</b><br>${esc(h.assumption)}</div>
+          <div class="hint-field"><b>LIFE DESIGN PROMPT</b><br>${nl(h.question)}</div>
+          <div class="hint-field"><b>MESSAGE FROM 2026</b></div>
+          <div class="hint-note">${esc(h.note)}</div>
+          <div class="hint-field"><b>MINATO RESPONSE</b></div>
+          <div class="hint-reply">${nl(h.response)}</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btnNext">${isLastStage ? "COMPLETE SIMULATION" : "NEXT STAGE"}</button>
+      </div>`, "screen scrollable");
+    document.getElementById("btnNext").onclick = () => {
+      if (isLastStage) { go("simulationComplete"); return; }
+      state.stageIndex++;
+      state.selectedLens = null;
+      state.selectedFragment = null;
+      state.selectedAssumption = null;
+      state.selectedLoss = null;
+      state.viewedRecords = [];
+      state.openRecord = null;
+      go("stageIntro", -1);
+    };
+  },
+
+  /* ---------- 10-11. SIMULATION COMPLETE（LIFE ARCHIVE一覧） ---------- */
+  simulationComplete() {
+    app.innerHTML = `
+      <div class="screen scrollable">
+        <div class="eyebrow" style="--acc:var(--mint)">Life Archive — 4 Prompts Stored</div>
+        <h1 class="h-large" style="letter-spacing:0.3em;">SIMULATION<br>COMPLETE</h1>
+        <p class="lead" style="margin-top:3vh;">あなたが残した4つの問いをもとに、<br>ミナトの人生シミュレーションが完了しました。</p>
+        <div class="card-grid hint-grid">
+          ${state.hints.map((h, idx) => `
+            <div class="select-card hint-card" style="--acc:${STAGES[idx] ? STAGES[idx].accent : "var(--mint)"}">
+              <div class="hint-age">AGE ${h.age}<small>${esc(h.motifName)}</small></div>
+              <div class="hint-field"><b>SIMULATION LENS</b><br>${esc(h.lensTitle)}</div>
+              <div class="hint-field"><b>LIFE DESIGN PROMPT</b><br>${nl(h.question)}</div>
+              <div class="hint-field"><b>MESSAGE FROM 2026</b></div>
+              <div class="hint-note">${esc(h.note)}</div>
+            </div>`).join("")}
+        </div>
+        <div class="actions">
+          <button class="btn" id="btnNext">NEXT</button>
+        </div>
+      </div>`;
+    document.getElementById("btnNext").onclick = () => go("lifeSummary");
+  },
+
+  /* ---------- 12. ミナトの人生総括 ---------- */
+  lifeSummary() {
+    dialogueScreen({
+      st: null,
+      speaker: "LIFE RECORD — MINATO",
+      blocks: LIFE_SUMMARY,
+      hudRight: null,
+      onFinish: () => go("minatoFinalReply")
+    });
+  },
+
+  /* ---------- 13. 18歳のミナトから最後の返信 ---------- */
+  minatoFinalReply() {
+    dialogueScreen({
+      st: null,
+      speaker: "MINATO",
+      blocks: MINATO_FINAL_REPLY,
+      hudRight: "RECONNECTED&nbsp;&nbsp;MINATO (18)",
+      onFinish: () => go("finalQuestion")
+    });
+  },
+
+  /* ---------- 14. 体験者への最後の問い ---------- */
+  finalQuestion() {
+    app.innerHTML = `
+      <div class="screen">
+        <div class="eyebrow" style="--acc:var(--mint)">Final Question</div>
+        <div class="ending-text">
+          ${FINAL_QUESTION_TEXT.map(p => `<p>${nl(p)}</p>`).join("")}
+        </div>
+        <div class="comm-panel" style="margin-top:1vh;">
+          <div class="comm-head">
+            <div class="hud-row"><span class="k">TO</span><span class="v">MINATO / 2050</span></div>
+            <div class="hud-row"><span class="k">SUBJECT</span><span class="v">FINAL QUESTION</span></div>
+          </div>
+          <div class="comm-body">
+            <textarea id="finalText" placeholder="あなたのアイデアを、ここに残してください"></textarea>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn" id="btnSave" disabled>SAVE FINAL QUESTION</button>
+        </div>
+      </div>`;
+    const ta = document.getElementById("finalText");
+    const btn = document.getElementById("btnSave");
+    ta.focus();
+    ta.addEventListener("input", () => { btn.disabled = ta.value.trim().length === 0; });
+    btn.onclick = () => {
+      const answer = ta.value.trim();
+      if (!answer) return;
+      state.finalAnswer = answer;
+      persist();
+      go("finalSaved");
+    };
+  },
+
+  /* ---------- 15. 最終保存・RESET ---------- */
+  finalSaved() {
+    app.innerHTML = `
+      <div class="screen">
+        <div class="transmit-text">TRANSMITTING TO 2050...</div>
+        <div class="loading-bar" style="margin-top:5vh;"><span></span></div>
+      </div>`;
+    setTimer(() => {
+      app.innerHTML = `
+        <div class="screen">
+          <div class="eyebrow" style="--acc:var(--mint)">Transmission Complete</div>
+          <p class="h-mid">未来への問いとして保存されました。</p>
+          <p class="lead" style="margin-top:4vh;">
+            あなたが残した問いと言葉は、<br>
+            2050年のミナトに届けられます。<br><br>
+            体験していただき、ありがとうございました。
+          </p>
+          <div class="actions">
+            <button class="btn btn-sub" id="btnReset">RESET</button>
+          </div>
+        </div>`;
+      document.getElementById("btnReset").onclick = () => {
+        state = initialState();
+        go("standby");
+      };
+    }, 2200);
+  }
+};
+
+/* ============================================================
+   起動
+   ============================================================ */
+
+function render() {
+  clearTimers();
+  typing = false;
+  typeSkip = null;
+  screens[state.screen]();
+}
+
+render();
+</script>
+</body>
+</html>
